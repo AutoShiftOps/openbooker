@@ -3,12 +3,22 @@
    Business logic (dates, parsing, overlap, analytics, Firebase sync) ported from
    the original .dc.html prototype essentially as-is. */
 
-// ---- Tunables (were CMS-editable props in the original prototype) ----
-const ACCENT = '#3d4a7d'; // deep indigo/purple, sampled from the SAMakeovers Media logo
-const CURRENCY = '$'; // CAD -- Mississauga, Ontario business
-const TRAVEL_BUFFER_MIN = 45;
-const DEFAULT_ADDRESS = '339 Rathburn Rd W, Mississauga, ON L5B 0K6'; // home base -- overridable per booking when she travels to a client instead
-const APPOINTMENT_DURATION_MIN = 90; // assumed length; also used for calendar-export end times
+// ---- Business profile (owner-customizable in Settings; these are just the
+// seed defaults so an existing install sees zero change until she edits them) ----
+const DEFAULT_BUSINESS_PROFILE = {
+  name: 'SAMakeovers',
+  tagline: 'FACIALS · SKINCARE · BEAUTY SERVICES',
+  location: 'MISSISSAUGA, ONTARIO',
+  accent: '#3d4a7d',     // deep indigo/purple, sampled from the SAMakeovers Media logo
+  accentSoft: '#12a457', // emerald green, sampled from the logo's core; header/FAB gradient partner
+  currency: '$',         // CAD -- Mississauga, Ontario business
+  hoursStart: 11,
+  hoursEnd: 19,          // 11:00 AM - 7:00 PM, matches Google Business Profile
+  travelBufferMin: 45,
+  appointmentDurationMin: 90, // assumed length; also used for calendar-export end times
+  defaultAddress: '339 Rathburn Rd W, Mississauga, ON L5B 0K6', // home base -- overridable per booking when she travels to a client instead
+  updatedAt: 0
+};
 
 // Web Push "VAPID" public key -- generate in Firebase Console: Project Settings ->
 // Cloud Messaging -> Web Push certificates -> Generate key pair. Paste the value
@@ -25,8 +35,21 @@ const LS_KEYS = {
   clients: 'asha_clients_v1',
   blockedDates: 'asha_blocked_dates_v1',
   lastBackup: 'asha_last_backup_v1',
-  pushToken: 'asha_push_token_v1'
+  pushToken: 'asha_push_token_v1',
+  businessProfile: 'asha_business_profile_v1'
 };
+
+function mergeSingleton(local, cloud){
+  if (!cloud) return local;
+  if (!local) return cloud;
+  return (cloud.updatedAt || 0) > (local.updatedAt || 0) ? cloud : local;
+}
+
+function applyAccentColors(accent, accentSoft){
+  const root = document.documentElement.style;
+  root.setProperty('--accent', accent);
+  root.setProperty('--accent-soft', accentSoft);
+}
 
 // ---- Pure business logic (dates, formatting, parsing, analytics) ----
 function pad(n){ return n<10?'0'+n:''+n; }
@@ -69,7 +92,7 @@ function fmtCountdown(dateStr,timeStr){
   if(!dateStr||!timeStr) return '';
   const target=toDateObj(dateStr,timeStr).getTime();
   const diffMs=target-Date.now();
-  if(diffMs <= -APPOINTMENT_DURATION_MIN*60000) return 'Overdue';
+  if(diffMs <= -state.businessProfile.appointmentDurationMin*60000) return 'Overdue';
   if(diffMs<=0) return 'Happening now';
   const mins=Math.round(diffMs/60000);
   if(mins<60) return `in ${mins} min`;
@@ -79,7 +102,7 @@ function fmtCountdown(dateStr,timeStr){
   return `in ${days} day${days===1?'':'s'}`;
 }
 function emptyForm(){
-  return { name:'', phone:'', services:[], date:'', time:'', address:DEFAULT_ADDRESS, price:'', notes:'' };
+  return { name:'', phone:'', services:[], date:'', time:'', address:state.businessProfile.defaultAddress, price:'', notes:'' };
 }
 function emptyEditForm(){
   return { name:'', phone:'', services:[], date:'', time:'', address:'', price:'', paymentMethod:'', notes:'' };
@@ -204,7 +227,7 @@ function byKeyMulti(arr, keysFn){
 }
 function gcalLink(a){
   const start = toDateObj(a.date, a.time);
-  const end = new Date(start.getTime() + APPOINTMENT_DURATION_MIN * 60000);
+  const end = new Date(start.getTime() + state.businessProfile.appointmentDurationMin * 60000);
   const fmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
   const svcLabel = serviceLabel(a) || 'Appointment';
   const details = encodeURIComponent(`${svcLabel}${a.notes ? ' — ' + a.notes : ''}`);
@@ -219,7 +242,7 @@ function gcalLink(a){
 // which a website by itself cannot do without her explicitly adding it once.
 function buildIcs(a){
   const start = toDateObj(a.date, a.time);
-  const end = new Date(start.getTime() + APPOINTMENT_DURATION_MIN * 60000);
+  const end = new Date(start.getTime() + state.businessProfile.appointmentDurationMin * 60000);
   const fmtUtc = d => `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
   const icsEsc = s => String(s || '').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
   return [
@@ -253,7 +276,6 @@ function buildIcs(a){
 // 1-hour granularity as the existing overlap-conflict check elsewhere in the app
 // (appointments don't carry a duration field, so an hour block per booking is the
 // same approximation already used for conflict detection).
-const BUSINESS_HOURS = { start: 11, end: 19 }; // 11:00 AM - 7:00 PM, matches Google Business Profile
 function getDaySchedule(appointments, dateStr){
   if (!dateStr) return [];
   const bookedByHour = new Map();
@@ -263,7 +285,7 @@ function getDaySchedule(appointments, dateStr){
     if (!bookedByHour.has(hour)) bookedByHour.set(hour, a);
   });
   const slots = [];
-  for (let h = BUSINESS_HOURS.start; h < BUSINESS_HOURS.end; h++) {
+  for (let h = state.businessProfile.hoursStart; h < state.businessProfile.hoursEnd; h++) {
     const booked = bookedByHour.get(h);
     slots.push({
       timeLabel: fmtTimeLabel(`${pad(h)}:00`),
@@ -392,7 +414,11 @@ const state = {
   appointments: [],
   screen: 'home',
   addTab: 'manual',
-  form: emptyForm(),
+  // Not emptyForm() here -- it reads state.businessProfile.defaultAddress,
+  // and `state` itself hasn't finished being constructed yet at this point
+  // (referencing it would throw). loadPersisted() calls emptyForm() again
+  // once businessProfile is loaded/corrected, before anything is rendered.
+  form: { name:'', phone:'', services:[], date:'', time:'', address:'', price:'', notes:'' },
   pasteText: '',
   search: '',
   detailId: null,
@@ -427,7 +453,8 @@ const state = {
   newClientForm: { name: '', phone: '', address: '' },
   mergingClientId: null,
   mergeTargetId: null,
-  blockedDates: []
+  blockedDates: [],
+  businessProfile: { ...DEFAULT_BUSINESS_PROFILE }
 };
 
 let auth = null, db = null, toastTimer = null;
@@ -472,6 +499,14 @@ function loadPersisted(){
     const raw = localStorage.getItem(LS_KEYS.blockedDates);
     state.blockedDates = raw ? JSON.parse(raw) : [];
   } catch(e) { state.blockedDates = []; }
+  try {
+    const raw = localStorage.getItem(LS_KEYS.businessProfile);
+    state.businessProfile = raw ? { ...DEFAULT_BUSINESS_PROFILE, ...JSON.parse(raw) } : { ...DEFAULT_BUSINESS_PROFILE };
+  } catch(e) { state.businessProfile = { ...DEFAULT_BUSINESS_PROFILE }; }
+  // Safe to build the real default form now -- state.businessProfile is loaded,
+  // unlike at the top-level state literal where it doesn't exist yet.
+  state.form = emptyForm();
+  applyAccentColors(state.businessProfile.accent, state.businessProfile.accentSoft);
 }
 
 function persist(list){
@@ -501,6 +536,14 @@ function persistClients(list){
 function persistBlockedDates(list){
   state.blockedDates = list;
   try { localStorage.setItem(LS_KEYS.blockedDates, JSON.stringify(list)); } catch(e) {}
+  pushToCloud();
+  scheduleRender();
+}
+function persistBusinessProfile(profile){
+  profile = { ...profile, updatedAt: Date.now() };
+  state.businessProfile = profile;
+  try { localStorage.setItem(LS_KEYS.businessProfile, JSON.stringify(profile)); } catch(e) {}
+  applyAccentColors(profile.accent, profile.accentSoft);
   pushToCloud();
   scheduleRender();
 }
@@ -536,18 +579,24 @@ function pullFromCloud(uid){
       const mergedClients = mergeById(state.clients, Array.isArray(d.clients) ? d.clients : []);
       const clients = reconcileClientsFromAppointments(mergedClients, appointments);
       const blockedDates = mergeById(state.blockedDates, Array.isArray(d.blockedDates) ? d.blockedDates : []);
+      // Not an array -- a single settings object, so "newer updatedAt wins"
+      // rather than the record-list merge rule used above.
+      const businessProfile = mergeSingleton(state.businessProfile, d.businessProfile);
       state.appointments = appointments;
       state.inventory = inventory;
       state.services = services;
       state.clients = clients;
       state.blockedDates = blockedDates;
+      state.businessProfile = businessProfile;
       try {
         localStorage.setItem(LS_KEYS.appointments, JSON.stringify(appointments));
         localStorage.setItem(LS_KEYS.inventory, JSON.stringify(inventory));
         localStorage.setItem(LS_KEYS.services, JSON.stringify(services));
         localStorage.setItem(LS_KEYS.clients, JSON.stringify(clients));
         localStorage.setItem(LS_KEYS.blockedDates, JSON.stringify(blockedDates));
+        localStorage.setItem(LS_KEYS.businessProfile, JSON.stringify(businessProfile));
       } catch(e) {}
+      applyAccentColors(businessProfile.accent, businessProfile.accentSoft);
       // Push the reconciled result back up so both sides converge on the same data.
       pushToCloud();
       setState({ cloudStatus: 'Synced from cloud.' });
@@ -561,7 +610,7 @@ function pushToCloud(){
   if (!db || !auth.currentUser) return;
   db.collection('users').doc(auth.currentUser.uid).set({
     appointments: state.appointments, inventory: state.inventory, services: state.services, clients: state.clients,
-    blockedDates: state.blockedDates, updatedAt: Date.now()
+    blockedDates: state.blockedDates, businessProfile: state.businessProfile, updatedAt: Date.now()
   }).catch(() => {});
 }
 function cloudSignIn(isSignUp){
@@ -998,13 +1047,13 @@ const Actions = {
 // ---- Computed view-model (mirrors the original renderVals()) ----
 function computeVals(){
   const s = state;
-  const accent = ACCENT, currency = CURRENCY;
+  const accent = s.businessProfile.accent, currency = s.businessProfile.currency;
   const upcoming = s.appointments.filter(a => a.status !== 'done' && a.status !== 'cancelled' && a.status !== 'no-show' && a.date).sort((a,b) => toDateObj(a.date,a.time) - toDateObj(b.date,b.time));
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 
   const isOverdue = a => a.status === 'upcoming' && a.date && a.time &&
-    (now - toDateObj(a.date, a.time)) > APPOINTMENT_DURATION_MIN * 60000;
+    (now - toDateObj(a.date, a.time)) > state.businessProfile.appointmentDurationMin * 60000;
 
   const withMeta = list => list.map(a => ({
     ...a,
@@ -1035,7 +1084,7 @@ function computeVals(){
   const inventoryList = s.inventory.map(i => ({ ...i, lowStock: i.threshold > 0 && i.qty <= i.threshold }));
   const lowStockItems = inventoryList.filter(i => i.lowStock);
 
-  const bufferMin = TRAVEL_BUFFER_MIN;
+  const bufferMin = s.businessProfile.travelBufferMin;
   const nextRaw = upcoming.find(a => !isOverdue(a));
   const nextAppt = nextRaw ? {
     ...withMeta([nextRaw])[0],
@@ -1162,14 +1211,15 @@ function computeVals(){
 
 // ---- Templates ----
 function renderHeader(v){
+  const bp = state.businessProfile;
   return `
   <header class="app-header">
     <button class="calendar-btn" data-action="goCalendar" aria-label="Calendar">${ICON_CALENDAR}</button>
     <button class="settings-btn" data-action="goSettings" aria-label="Settings">${ICON_GEAR}</button>
-    <div class="wordmark">SAMakeovers</div>
+    <div class="wordmark">${esc(bp.name)}</div>
     <div class="header-divider"></div>
-    <div class="header-tagline">FACIALS &middot; SKINCARE &middot; BEAUTY SERVICES</div>
-    <div class="header-location">MISSISSAUGA, ONTARIO</div>
+    <div class="header-tagline">${esc(bp.tagline)}</div>
+    <div class="header-location">${esc(bp.location)}</div>
     <div class="header-now" id="header-now">${formatNowLabel()}</div>
     <div class="header-subtitle">${esc(v.headerSubtitle)}</div>
     ${v.hasOverlap ? `<div class="overlap-banner">${ICON_WARNING} Two appointments are too close together — check timing.</div>` : ''}
@@ -1416,7 +1466,7 @@ function renderSearch(v){
 function renderEarnings(v){
   let html = `<div>
     <div class="stat-row">
-      <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value">${esc(CURRENCY)}${v.weekTotal}</div></div>
+      <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value">${esc(v.currency)}${v.weekTotal}</div></div>
       <div class="stat-card"><div class="stat-label">Completed jobs</div><div class="stat-value">${v.completedCount}</div></div>
     </div>`;
   html += `<div class="section-title">Completed history</div>`;
@@ -1447,7 +1497,7 @@ function renderEarnings(v){
   }
   if (v.hasTopServices) {
     html += `<div class="section-title">Most requested services</div><div class="list-col">
-      ${v.topServices.map(sv => `<div class="list-row"><div><div class="list-row-label">${esc(sv.label)}</div><div class="list-row-sub">${esc(sv.sub)}</div></div><div class="list-row-value" style="color:${ACCENT}">${esc(sv.valueLabel)}</div></div>`).join('')}
+      ${v.topServices.map(sv => `<div class="list-row"><div><div class="list-row-label">${esc(sv.label)}</div><div class="list-row-sub">${esc(sv.sub)}</div></div><div class="list-row-value" style="color:${esc(v.accent)}">${esc(sv.valueLabel)}</div></div>`).join('')}
     </div>`;
   }
   if (v.hasPaymentBreakdown) {
@@ -1634,6 +1684,27 @@ function renderSettings(v){
     }
     if (s.cloudStatus) html += `<div class="cloud-status">${esc(s.cloudStatus)}</div>`;
   }
+
+  const bp = s.businessProfile;
+  html += `<div class="section-title">Business details</div>
+  <div class="hint-text">Shown in the header and used as booking defaults -- update any time.</div>
+  <input class="field" style="margin-bottom:8px" data-bind="businessProfile.name" value="${esc(bp.name)}" placeholder="Business name"/>
+  <input class="field" style="margin-bottom:8px" data-bind="businessProfile.tagline" value="${esc(bp.tagline)}" placeholder="Tagline"/>
+  <input class="field" style="margin-bottom:8px" data-bind="businessProfile.location" value="${esc(bp.location)}" placeholder="Location (city, province)"/>
+  <input class="field" style="margin-bottom:8px" data-bind="businessProfile.defaultAddress" value="${esc(bp.defaultAddress)}" placeholder="Default address"/>
+  <div style="display:flex;gap:10px;margin-bottom:8px">
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Accent color</div><input type="color" class="field" style="padding:4px;height:44px" data-bind="businessProfile.accent" value="${esc(bp.accent)}"/></div>
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Accent (secondary)</div><input type="color" class="field" style="padding:4px;height:44px" data-bind="businessProfile.accentSoft" value="${esc(bp.accentSoft)}"/></div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:8px">
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Currency symbol</div><input class="field" data-bind="businessProfile.currency" value="${esc(bp.currency)}" placeholder="$"/></div>
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Appt length (min)</div><input type="number" inputmode="numeric" class="field" data-bind="businessProfile.appointmentDurationMin" value="${esc(bp.appointmentDurationMin)}"/></div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:8px">
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours start (0-23)</div><input type="number" inputmode="numeric" min="0" max="23" class="field" data-bind="businessProfile.hoursStart" value="${esc(bp.hoursStart)}"/></div>
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours end (1-24)</div><input type="number" inputmode="numeric" min="1" max="24" class="field" data-bind="businessProfile.hoursEnd" value="${esc(bp.hoursEnd)}"/></div>
+  </div>
+  <div style="margin-bottom:22px"><div class="hint-text" style="margin-bottom:4px">Travel buffer between appointments (min)</div><input type="number" inputmode="numeric" class="field" data-bind="businessProfile.travelBufferMin" value="${esc(bp.travelBufferMin)}"/></div>`;
 
   html += `<div class="section-title">Services you offer</div>
   <div class="hint-text">Add, rename, or remove the services shown when booking a new appointment.</div>
@@ -1843,6 +1914,11 @@ root.addEventListener('input', e => {
     // default letter layout for tel/email/number fields, forcing a manual tap
     // back to the digit pad after every character.
     if (el.dataset.bind === 'search') scheduleRender();
+    // Color pickers fire 'input' continuously while dragging -- apply live so
+    // she sees the accent change in real time, without a full re-render.
+    if (el.dataset.bind === 'businessProfile.accent' || el.dataset.bind === 'businessProfile.accentSoft') {
+      applyAccentColors(state.businessProfile.accent, state.businessProfile.accentSoft);
+    }
   }
 });
 
@@ -1862,7 +1938,17 @@ root.addEventListener('change', e => {
     return;
   }
   if (el.dataset && el.dataset.bind) {
-    scheduleRender();
+    if (el.dataset.bind.indexOf('businessProfile.') === 0) {
+      const field = el.dataset.bind.split('.')[1];
+      const numericFields = ['hoursStart', 'hoursEnd', 'travelBufferMin', 'appointmentDurationMin'];
+      if (numericFields.indexOf(field) !== -1) {
+        const n = parseInt(state.businessProfile[field], 10);
+        state.businessProfile[field] = isNaN(n) ? DEFAULT_BUSINESS_PROFILE[field] : n;
+      }
+      persistBusinessProfile(state.businessProfile);
+    } else {
+      scheduleRender();
+    }
   }
 });
 

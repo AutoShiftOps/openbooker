@@ -11,7 +11,7 @@
   ],
   "hosting": {
     "public": ".",
-    "ignore": ["firebase.json", ".firebaserc", "**/.*", "node_modules/**", "functions/**", "tests/**"],
+    "ignore": ["firebase.json", ".firebaserc", "**/.*", ".git/**", ".claude/**", ".firebase/**", "node_modules/**", "functions/**", "tests/**"],
     "rewrites": [
       { "source": "/", "destination": "/index.html" }
     ],
