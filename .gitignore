@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Firebase local cache/build artifacts (not source)
+.firebase/
+
+# Claude Code session/agent tooling (not app source)
+.claude/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

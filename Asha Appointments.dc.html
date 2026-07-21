@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#c8577f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Asha Bookings">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./firebase-config.js"></script>
+  <style>
+    body { margin:0; background:#f3e4e9; }
+    * { box-sizing:border-box; font-family:'Inter',sans-serif; -webkit-tap-highlight-color:transparent; }
+    ::-webkit-scrollbar{width:0;height:0}
+    @keyframes toastIn { from{opacity:0;transform:translate(-50%,10px)} to{opacity:1;transform:translate(-50%,0)} }
+  </style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:24px 12px;background:radial-gradient(circle at 50% 0%,#fbeef2,#f3e4e9)">
+<div style="width:100%;max-width:420px;background:#fffaf9;border-radius:36px;box-shadow:0 30px 60px -20px rgba(150,60,90,0.35);overflow:hidden;position:relative;min-height:820px;display:flex;flex-direction:column">
+
+  <div style="background:linear-gradient(135deg,{{ accent }},#f6b9cf);padding:28px 22px 22px;color:#fff;position:relative;text-align:center">
+    <div onClick="{{ goSettings }}" style="position:absolute;top:18px;right:18px;cursor:pointer;padding:4px">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+    </div>
+    <div style="font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:25px;letter-spacing:0.5px">SAMakeovers</div>
+    <div style="width:120px;height:1px;background:rgba(255,255,255,0.6);margin:8px auto"></div>
+    <div style="font-size:10px;font-weight:600;letter-spacing:2px;opacity:0.95">FACIALS · SKINCARE · BEAUTY SERVICES</div>
+    <div style="font-size:9.5px;letter-spacing:1.5px;opacity:0.8;margin-top:4px">MISSISSAUGA, ONTARIO</div>
+    <div style="font-size:13px;opacity:0.92;margin-top:10px">{{ headerSubtitle }}</div>
+    <sc-if value="{{ hasOverlap }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:12px;background:rgba(255,255,255,0.22);border:1px solid rgba(255,255,255,0.5);border-radius:12px;padding:9px 12px;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        Two appointments are too close together — check timing.
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="flex:1;overflow-y:auto;padding:18px 18px 90px">
+
+    <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <sc-if value="{{ hasLowStock }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ goInventory }}" style="background:#fdecea;border:1px solid #f5c2bb;border-radius:14px;padding:11px 13px;margin-bottom:14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="font-size:12.5px;color:#a8422f;font-weight:600">⚠ {{ lowStockCount }} item(s) running low on stock.</div>
+            <div style="font-size:12px;font-weight:700;color:#a8422f;white-space:nowrap">Restock →</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ needsBackupNag }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ goSettings }}" style="background:#fdecea;border:1px solid #f5c2bb;border-radius:14px;padding:11px 13px;margin-bottom:14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="font-size:12.5px;color:#a8422f;font-weight:600">{{ backupNagLabel }}</div>
+            <div style="font-size:12px;font-weight:700;color:#a8422f;white-space:nowrap">Back up →</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ nextAppt }}" hint-placeholder-val="{{ null }}">
+          <div onClick="{{ nextAppt.openFn }}" style="background:linear-gradient(135deg,#5c2340,#7a3350);border-radius:18px;padding:16px 18px;margin-bottom:18px;cursor:pointer;color:#fff">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.5px;opacity:0.8;text-transform:uppercase">Next up · {{ nextAppt.countdown }}</div>
+            <div style="font-family:'Poppins',sans-serif;font-weight:700;font-size:17px;margin-top:5px">{{ nextAppt.name }} — {{ nextAppt.service }}</div>
+            <div style="font-size:13px;opacity:0.9;margin-top:3px">{{ nextAppt.dateLabel }} at {{ nextAppt.timeLabel }}</div>
+            <div style="margin-top:10px;background:rgba(255,255,255,0.15);border-radius:10px;padding:8px 11px;font-size:12.5px;font-weight:600;display:inline-block;white-space:nowrap">🚗 Leave by {{ nextAppt.leaveByLabel }}</div>
+          </div>
+        </sc-if>
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Today · {{ todayLabel }}</div>
+        <sc-if value="{{ todayList.length }}" hint-placeholder-val="{{ 0 }}">
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:22px">
+            <sc-for list="{{ todayList }}" as="appt" hint-placeholder-count="1">
+              <div onClick="{{ appt.openFn }}" style="background:#fff0f4;border:1px solid #f6cfdd;border-radius:16px;padding:13px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600;font-size:14.5px;color:#5c2340">{{ appt.name }}</div>
+                  <div style="font-size:12.5px;color:#a5637d;margin-top:2px">{{ appt.service }}</div>
+                </div>
+                <div style="text-align:right">
+                  <div style="font-weight:700;color:{{ accent }};font-size:14px">{{ appt.timeLabel }}</div>
+                  <sc-if value="{{ appt.overlap }}" hint-placeholder-val="{{ false }}"><div style="font-size:10.5px;color:#c0392b;font-weight:700;margin-top:2px">⚠ conflict</div></sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noToday }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;color:#b98a9d;font-size:13px;padding:18px 0 24px">No appointments today. Enjoy the rest!</div>
+        </sc-if>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Upcoming</div>
+        <sc-if value="{{ upcomingList.length }}" hint-placeholder-val="{{ 0 }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ upcomingList }}" as="appt" hint-placeholder-count="3">
+              <div onClick="{{ appt.openFn }}" style="background:#fff;border:1px solid #f1dbe3;border-radius:16px;padding:13px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600;font-size:14.5px;color:#5c2340">{{ appt.name }}</div>
+                  <div style="font-size:12.5px;color:#a5637d;margin-top:2px">{{ appt.service }} · {{ appt.dateLabel }}</div>
+                </div>
+                <div style="font-weight:700;color:{{ accent }};font-size:14px">{{ appt.timeLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noUpcoming }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;color:#c7a3b2;font-size:13px;padding:30px 10px;border:1.5px dashed #e9c6d4;border-radius:16px">
+            No appointments yet.<br/>Tap the <b>+</b> button below to add your first booking.
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAdd }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;gap:6px;margin-bottom:16px;background:#fbeef2;border-radius:14px;padding:4px">
+          <div onClick="{{ setTabManual }}" style="flex:1;text-align:center;padding:9px 4px;border-radius:11px;font-size:12px;font-weight:600;cursor:pointer;background:{{ manualTabBg }};color:{{ manualTabColor }}">Manual</div>
+          <div onClick="{{ setTabPaste }}" style="flex:1;text-align:center;padding:9px 4px;border-radius:11px;font-size:12px;font-weight:600;cursor:pointer;background:{{ pasteTabBg }};color:{{ pasteTabColor }}">Paste chat</div>
+          <div onClick="{{ setTabScreenshot }}" style="flex:1;text-align:center;padding:9px 4px;border-radius:11px;font-size:12px;font-weight:600;cursor:pointer;background:{{ screenshotTabBg }};color:{{ screenshotTabColor }}">Screenshot</div>
+        </div>
+
+        <sc-if value="{{ isPasteTab }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12.5px;color:#a5637d;margin-bottom:8px">Paste the whole WhatsApp conversation — greetings and all. We'll scan it for the date, time, service, name & phone.</div>
+          <textarea value="{{ pasteText }}" onChange="{{ onPasteChange }}" placeholder="Hi Asha, how are you? Are you available today?&#10;Yes! What service do you need?&#10;Bridal makeup on 5 Aug at 6am, at Green Park. Call 9876543210" style="width:100%;min-height:110px;border:1.5px solid #f1dbe3;border-radius:14px;padding:11px;font-size:13px;color:#5c2340;resize:none;outline:none"></textarea>
+          <div onClick="{{ onParse }}" style="margin-top:10px;text-align:center;background:{{ accent }};color:#fff;font-weight:600;font-size:13.5px;padding:11px;border-radius:12px;cursor:pointer">Parse & review below</div>
+        </sc-if>
+
+        <sc-if value="{{ isScreenshotTab }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12.5px;color:#a5637d;margin-bottom:8px">Upload a screenshot of the chat. We'll read the text on-device and pull out the details.</div>
+          <label style="display:block;text-align:center;border:1.5px dashed #e9c6d4;border-radius:14px;padding:22px 10px;cursor:pointer;color:#a5637d;font-size:13px;font-weight:600">
+            📷 Tap to choose a screenshot
+            <input type="file" accept="image/*" onChange="{{ onScreenshotChange }}" style="display:none"/>
+          </label>
+          <sc-if value="{{ ocrStatus }}" hint-placeholder-val="{{ null }}">
+            <div style="margin-top:10px;font-size:12.5px;color:{{ accent }};font-weight:600;text-align:center">{{ ocrStatus }}</div>
+          </sc-if>
+        </sc-if>
+
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+          <input value="{{ form.name }}" onChange="{{ setField_name }}" placeholder="Client name" style="{{ inputStyle }}"/>
+          <input value="{{ form.phone }}" onChange="{{ setField_phone }}" placeholder="Phone number" style="{{ inputStyle }}"/>
+          <select value="{{ form.service }}" onChange="{{ setField_service }}" style="{{ inputStyle }}">
+            <option value="">Select service</option>
+            <sc-for list="{{ serviceOptions }}" as="s" hint-placeholder-count="6"><option value="{{ s }}">{{ s }}</option></sc-for>
+          </select>
+          <div style="display:flex;gap:10px">
+            <input type="date" value="{{ form.date }}" onChange="{{ setField_date }}" style="{{ inputStyle }};flex:1"/>
+            <input type="time" value="{{ form.time }}" onChange="{{ setField_time }}" style="{{ inputStyle }};flex:1"/>
+          </div>
+          <input value="{{ form.address }}" onChange="{{ setField_address }}" placeholder="Location / address" style="{{ inputStyle }}"/>
+          <input value="{{ form.price }}" onChange="{{ setField_price }}" placeholder="Price {{ priceHint }}" style="{{ inputStyle }}"/>
+          <textarea value="{{ form.notes }}" onChange="{{ setField_notes }}" placeholder="Notes (allergies, reference look, etc.)" style="{{ inputStyle }};min-height:60px;resize:none"></textarea>
+        </div>
+
+        <div onClick="{{ toggleLogPast }}" style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+          <div style="width:18px;height:18px;border-radius:5px;border:1.5px solid {{ accent }};background:{{ logPastCheckBg }};flex-shrink:0"></div>
+          <div style="font-size:12.5px;color:#7a3350;font-weight:600">This already happened — log it as a completed visit</div>
+        </div>
+
+        <sc-if value="{{ logPast }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:10px;background:#fff0f4;border-radius:14px;padding:12px">
+            <div style="font-size:12px;font-weight:700;color:#7a3350;margin-bottom:8px">Payment method</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <sc-for list="{{ paymentOptions }}" as="opt" hint-placeholder-count="4">
+                <div onClick="{{ opt.selectFn }}" style="padding:8px 12px;border-radius:10px;border:1.5px solid #e9c6d4;font-size:12.5px;font-weight:600;cursor:pointer;background:{{ opt.bg }};color:{{ opt.color }}">{{ opt.label }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ formOverlapWarning }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:10px;background:#fdecea;border:1px solid #f5c2bb;color:#c0392b;font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:12px">⚠ This clashes with another booking within an hour. Double-check the time.</div>
+        </sc-if>
+
+        <div onClick="{{ onSave }}" style="margin-top:16px;text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:14.5px;padding:13px;border-radius:14px;cursor:pointer;box-shadow:0 8px 18px -8px {{ accent }}">Save appointment</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <input value="{{ searchQuery }}" onChange="{{ onSearchChange }}" placeholder="Search client name or phone" style="{{ inputStyle }};margin-bottom:14px"/>
+        <sc-if value="{{ searchResults.length }}" hint-placeholder-val="{{ 0 }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ searchResults }}" as="appt" hint-placeholder-count="3">
+              <div onClick="{{ appt.openFn }}" style="background:#fff;border:1px solid #f1dbe3;border-radius:16px;padding:13px 14px;cursor:pointer">
+                <div style="display:flex;justify-content:space-between">
+                  <div style="font-weight:600;font-size:14.5px;color:#5c2340">{{ appt.name }}</div>
+                  <div style="font-size:11.5px;font-weight:700;color:{{ appt.statusColor }}">{{ appt.statusLabel }}</div>
+                </div>
+                <div style="font-size:12.5px;color:#a5637d;margin-top:2px">{{ appt.service }} · {{ appt.dateLabel }} {{ appt.timeLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noSearchResults }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;color:#c7a3b2;font-size:13px;padding:30px 10px">{{ searchEmptyLabel }}</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isEarnings }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <div style="flex:1;background:#fff0f4;border-radius:16px;padding:14px;text-align:center">
+            <div style="font-size:11.5px;color:#a5637d;font-weight:600">This week</div>
+            <div style="font-family:'Poppins',sans-serif;font-weight:700;font-size:20px;color:#5c2340;margin-top:4px">{{ currency }}{{ weekTotal }}</div>
+          </div>
+          <div style="flex:1;background:#fff0f4;border-radius:16px;padding:14px;text-align:center">
+            <div style="font-size:11.5px;color:#a5637d;font-weight:600">Completed jobs</div>
+            <div style="font-family:'Poppins',sans-serif;font-weight:700;font-size:20px;color:#5c2340;margin-top:4px">{{ completedCount }}</div>
+          </div>
+        </div>
+        <sc-if value="{{ hasTopClients }}" hint-placeholder-val="{{ false }}">
+          <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Top clients</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+            <sc-for list="{{ topClients }}" as="c" hint-placeholder-count="3">
+              <div style="display:flex;justify-content:space-between;background:#fff;border:1px solid #f1dbe3;border-radius:12px;padding:10px 13px">
+                <div><div style="font-weight:600;font-size:13.5px;color:#5c2340">{{ c.label }}</div><div style="font-size:11.5px;color:#a5637d">{{ c.sub }}</div></div>
+                <div style="font-weight:700;color:#5c2340;font-size:13.5px">{{ c.valueLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasTopServices }}" hint-placeholder-val="{{ false }}">
+          <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Most requested services</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+            <sc-for list="{{ topServices }}" as="sv" hint-placeholder-count="3">
+              <div style="display:flex;justify-content:space-between;background:#fff;border:1px solid #f1dbe3;border-radius:12px;padding:10px 13px">
+                <div><div style="font-weight:600;font-size:13.5px;color:#5c2340">{{ sv.label }}</div><div style="font-size:11.5px;color:#a5637d">{{ sv.sub }}</div></div>
+                <div style="font-weight:700;color:{{ accent }};font-size:13.5px">{{ sv.valueLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasPaymentBreakdown }}" hint-placeholder-val="{{ false }}">
+          <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">By payment method</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+            <sc-for list="{{ paymentBreakdown }}" as="p" hint-placeholder-count="3">
+              <div style="background:#fff0f4;border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:600;color:#5c2340">{{ p.label }}: {{ p.valueLabel }}</div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Completed history</div>
+        <sc-if value="{{ completedList.length }}" hint-placeholder-val="{{ 0 }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ completedList }}" as="appt" hint-placeholder-count="3">
+              <div style="background:#fff;border:1px solid #f1dbe3;border-radius:16px;padding:12px 14px;display:flex;justify-content:space-between">
+                <div>
+                  <div style="font-weight:600;font-size:14px;color:#5c2340">{{ appt.name }}</div>
+                  <div style="font-size:12px;color:#a5637d">{{ appt.service }} · {{ appt.dateLabel }}</div>
+                </div>
+                <div style="font-weight:700;color:#5c2340;font-size:13.5px">{{ appt.priceLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noCompleted }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;color:#c7a3b2;font-size:13px;padding:20px 10px">Nothing completed yet — mark bookings done from their detail screen.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div onClick="{{ goBack }}" style="font-size:13px;color:{{ accent }};font-weight:600;margin-bottom:14px;cursor:pointer">← Back</div>
+        <div style="background:#fff0f4;border-radius:18px;padding:18px;margin-bottom:14px">
+          <div style="font-family:'Poppins',sans-serif;font-weight:700;font-size:18px;color:#5c2340">{{ detail.name }}</div>
+          <div style="font-size:13px;color:#a5637d;margin-top:3px">{{ detail.service }}</div>
+          <sc-if value="{{ detail.cancelled }}" hint-placeholder-val="{{ false }}">
+            <div style="display:inline-block;margin-top:8px;background:#fdecea;color:#c0392b;font-weight:700;font-size:11.5px;padding:5px 10px;border-radius:8px">Cancelled</div>
+          </sc-if>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:#5c2340">
+            <div><b>When:</b> {{ detail.dateLabel }} at {{ detail.timeLabel }}</div>
+            <sc-if value="{{ detail.address }}" hint-placeholder-val="{{ false }}"><div><b>Where:</b> {{ detail.address }}</div></sc-if>
+            <sc-if value="{{ detail.priceLabel }}" hint-placeholder-val="{{ false }}"><div><b>Price:</b> {{ detail.priceLabel }}</div></sc-if>
+            <sc-if value="{{ detail.notes }}" hint-placeholder-val="{{ false }}"><div><b>Notes:</b> {{ detail.notes }}</div></sc-if>
+          </div>
+        </div>
+
+        <sc-if value="{{ hasHistory }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#fff;border:1px solid #f1dbe3;border-radius:14px;padding:12px 14px;margin-bottom:14px">
+            <div style="font-size:11.5px;font-weight:700;color:#a5637d;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Rescheduled from</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <sc-for list="{{ detail.history }}" as="h" hint-placeholder-count="1">
+                <div style="font-size:13px;color:#b98a9d;text-decoration:line-through">{{ h.dateLabel }} at {{ h.timeLabel }}</div>
+              </sc-for>
+              <div style="font-size:13.5px;font-weight:700;color:#fff;background:{{ accent }};border-radius:9px;padding:7px 10px;display:inline-block;width:fit-content">Now: {{ detail.dateLabel }} at {{ detail.timeLabel }}</div>
+            </div>
+          </div>
+        </sc-if>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <a href="{{ detail.telLink }}" style="text-decoration:none;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:13px;padding:12px;font-weight:600;font-size:13px;color:#5c2340">📞 Call</a>
+          <a href="{{ detail.waLink }}" target="_blank" style="text-decoration:none;text-align:center;background:#e9f8ef;border:1.5px solid #bfe8cf;border-radius:13px;padding:12px;font-weight:600;font-size:13px;color:#256b3f">WhatsApp</a>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <a href="{{ detail.mapLink }}" target="_blank" style="text-decoration:none;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:13px;padding:12px;font-weight:600;font-size:13px;color:#5c2340">📍 Directions</a>
+          <a href="{{ detail.gcalLink }}" target="_blank" style="text-decoration:none;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:13px;padding:12px;font-weight:600;font-size:13px;color:#5c2340">🗓 Add to Calendar</a>
+        </div>
+
+        <sc-if value="{{ showActionRow }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ openComplete }}" style="text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:14px;padding:12px;border-radius:13px;cursor:pointer;margin-bottom:10px">Mark as completed</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div onClick="{{ openReschedule }}" style="text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:12px;padding:11px;font-weight:600;font-size:13px;color:#5c2340;cursor:pointer">Reschedule</div>
+            <div onClick="{{ onCancelAppt }}" style="text-align:center;background:#fff;border:1.5px solid #f5c2bb;border-radius:12px;padding:11px;font-weight:600;font-size:13px;color:#c0392b;cursor:pointer">Cancel appointment</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isReschedulingThis }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#fff0f4;border:1px solid #f6cfdd;border-radius:16px;padding:14px;margin-bottom:10px">
+            <div style="font-weight:700;font-size:13.5px;color:#5c2340;margin-bottom:8px">New date & time</div>
+            <div style="display:flex;gap:10px;margin-bottom:10px">
+              <input type="date" value="{{ resDate }}" onChange="{{ onResDateChange }}" style="{{ inputStyle }};flex:1"/>
+              <input type="time" value="{{ resTime }}" onChange="{{ onResTimeChange }}" style="{{ inputStyle }};flex:1"/>
+            </div>
+            <div style="display:flex;gap:8px">
+              <div onClick="{{ cancelReschedule }}" style="flex:1;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:11px;padding:10px;font-weight:600;font-size:13px;color:#5c2340;cursor:pointer">Cancel</div>
+              <div onClick="{{ confirmReschedule }}" style="flex:1;text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:11px;cursor:pointer">Save new time</div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isCompletingThis }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#fff0f4;border:1px solid #f6cfdd;border-radius:16px;padding:14px;margin-bottom:10px">
+            <div style="font-weight:700;font-size:13.5px;color:#5c2340;margin-bottom:8px">Confirm completion</div>
+            <input value="{{ pendingPrice }}" onChange="{{ onPendingPriceChange }}" placeholder="Final price" style="{{ inputStyle }};margin-bottom:8px"/>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              <sc-for list="{{ paymentOptions }}" as="opt" hint-placeholder-count="4">
+                <div onClick="{{ opt.selectFn }}" style="padding:8px 12px;border-radius:10px;border:1.5px solid #e9c6d4;font-size:12.5px;font-weight:600;cursor:pointer;background:{{ opt.bg }};color:{{ opt.color }}">{{ opt.label }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:8px">
+              <div onClick="{{ cancelComplete }}" style="flex:1;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:11px;padding:10px;font-weight:600;font-size:13px;color:#5c2340;cursor:pointer">Cancel</div>
+              <div onClick="{{ confirmComplete }}" style="flex:1;text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:11px;cursor:pointer">Confirm</div>
+            </div>
+          </div>
+        </sc-if>
+        <div onClick="{{ deleteAppt }}" style="text-align:center;color:#c0392b;font-weight:600;font-size:13px;padding:10px;cursor:pointer">Delete appointment</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isInventory }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <sc-if value="{{ hasLowStock }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#fdecea;border:1px solid #f5c2bb;border-radius:14px;padding:11px 13px;margin-bottom:14px;font-size:12.5px;color:#a8422f;font-weight:600">⚠ {{ lowStockCount }} item(s) running low — restock soon.</div>
+        </sc-if>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Stock on hand</div>
+        <sc-if value="{{ hasInventory }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+            <sc-for list="{{ inventoryList }}" as="item" hint-placeholder-count="3">
+              <div style="background:#fff;border:1.5px solid #f1dbe3;border-radius:14px;padding:12px 14px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div>
+                    <div style="font-weight:600;font-size:14px;color:#5c2340">{{ item.name }}</div>
+                    <sc-if value="{{ item.lowStock }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:#c0392b;font-weight:700;margin-top:2px">Low stock</div></sc-if>
+                  </div>
+                  <div onClick="{{ item.deleteFn }}" style="font-size:11.5px;color:#c7a3b2;cursor:pointer">Remove</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+                  <div onClick="{{ item.decFn }}" style="width:30px;height:30px;border-radius:9px;background:#fbeef2;text-align:center;line-height:30px;font-weight:700;color:{{ accent }};cursor:pointer">−</div>
+                  <div style="font-weight:700;font-size:15px;color:#5c2340;min-width:50px;text-align:center">{{ item.qty }} {{ item.unit }}</div>
+                  <div onClick="{{ item.incFn }}" style="width:30px;height:30px;border-radius:9px;background:#fbeef2;text-align:center;line-height:30px;font-weight:700;color:{{ accent }};cursor:pointer">+</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ !hasInventory }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;color:#c7a3b2;font-size:13px;padding:20px 10px;margin-bottom:16px">No items yet — add wax tins, facial packs, and other supplies below.</div>
+        </sc-if>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:10px">Add item</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input value="{{ invName }}" onChange="{{ onInvNameChange }}" placeholder="Item name (e.g. Wax tins)" style="{{ inputStyle }}"/>
+          <div style="display:flex;gap:8px">
+            <input value="{{ invQty }}" onChange="{{ onInvQtyChange }}" placeholder="Quantity" style="{{ inputStyle }};flex:1"/>
+            <input value="{{ invUnit }}" onChange="{{ onInvUnitChange }}" placeholder="Unit (tins, packs)" style="{{ inputStyle }};flex:1"/>
+          </div>
+          <input value="{{ invThreshold }}" onChange="{{ onInvThresholdChange }}" placeholder="Alert when at or below…" style="{{ inputStyle }}"/>
+          <div onClick="{{ onAddInventory }}" style="text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:14px;padding:12px;border-radius:13px;cursor:pointer">Add to stock</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div onClick="{{ goHome }}" style="font-size:13px;color:{{ accent }};font-weight:600;margin-bottom:14px;cursor:pointer">← Back</div>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:8px">Cloud backup (free)</div>
+        <sc-if value="{{ cloudNotReady }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:12.5px;color:#a5637d;margin-bottom:22px;background:#fbeef2;border-radius:12px;padding:11px 13px">Not set up yet. Create a free Firebase project and paste its keys into <b>firebase-config.js</b> to turn this on — then her bookings sync automatically, safe even through a phone change or full reset.</div>
+        </sc-if>
+        <sc-if value="{{ cloudReady }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ cloudUser }}" hint-placeholder-val="{{ null }}">
+            <div style="font-size:13px;color:#5c2340;margin-bottom:6px">Signed in as <b>{{ cloudUser }}</b> — syncing automatically.</div>
+            <div onClick="{{ onCloudSignOut }}" style="display:inline-block;font-size:12.5px;color:#c0392b;font-weight:600;cursor:pointer;margin-bottom:10px">Sign out</div>
+          </sc-if>
+          <sc-if value="{{ noCloudUser }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:12.5px;color:#a5637d;margin-bottom:10px">Sign in on this phone and the new one with the same account to carry her bookings across, safe from any local data clearing.</div>
+            <div onClick="{{ onGoogleSignIn }}" style="display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1.5px solid #e9c6d4;border-radius:12px;padding:11px;font-weight:600;font-size:13.5px;color:#5c2340;cursor:pointer;margin-bottom:14px">
+              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h11.8c-.5 2.7-2 5-4.3 6.6v5.5h7C42.6 37.5 45.1 31.5 45.1 24.5z"/><path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.6-3.9-12.4-9.1H4.3v5.7C7.9 41 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.6 28.1c-.5-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.5 2 24s.8 6.9 2.3 9.8l7.3-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.2-6.2C34.9 4.2 29.9 2 24 2 15.4 2 7.9 7 4.3 14.2l7.3 5.7c1.8-5.2 6.6-9.2 12.4-9.2z"/></svg>
+              Continue with Google
+            </div>
+            <div style="text-align:center;font-size:11.5px;color:#c7a3b2;margin-bottom:14px">or use email & password</div>
+            <div style="display:flex;gap:8px;margin-bottom:10px;background:#fbeef2;border-radius:12px;padding:4px">
+              <div onClick="{{ setAuthSignin }}" style="flex:1;text-align:center;padding:8px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;background:{{ authTabSigninBg }};color:{{ authTabSigninColor }}">Sign in</div>
+              <div onClick="{{ setAuthSignup }}" style="flex:1;text-align:center;padding:8px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;background:{{ authTabSignupBg }};color:{{ authTabSignupColor }}">Create account</div>
+            </div>
+            <input value="{{ authEmail }}" onChange="{{ onAuthEmailChange }}" placeholder="Email" style="{{ inputStyle }};margin-bottom:8px"/>
+            <input type="password" value="{{ authPassword }}" onChange="{{ onAuthPasswordChange }}" placeholder="Password" style="{{ inputStyle }};margin-bottom:8px"/>
+            <div onClick="{{ onCloudSubmit }}" style="text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:13.5px;padding:11px;border-radius:12px;cursor:pointer;margin-bottom:8px">{{ authSubmitLabel }}</div>
+          </sc-if>
+          <sc-if value="{{ cloudStatus }}" hint-placeholder-val="{{ null }}">
+            <div style="font-size:12px;color:{{ accent }};font-weight:600;margin-bottom:22px">{{ cloudStatus }}</div>
+          </sc-if>
+        </sc-if>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:8px">Google Business Profile</div>
+        <div style="font-size:12.5px;color:#a5637d;margin-bottom:8px">Save the link to your Business Profile to jump straight to your reviews and reply to clients.</div>
+        <input value="{{ gbpUrl }}" onChange="{{ onGbpUrlChange }}" placeholder="Paste your Google Business Profile / Maps link" style="{{ inputStyle }};margin-bottom:8px"/>
+        <a href="{{ gbpOpenLink }}" target="_blank" style="text-decoration:none;display:block;text-align:center;background:{{ accent }};color:#fff;font-weight:700;font-size:13.5px;padding:11px;border-radius:12px;margin-bottom:22px">Open reviews & reply</a>
+
+        <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#7a3350;margin-bottom:8px">Backup your data</div>
+        <div style="font-size:12.5px;color:#a5637d;margin-bottom:6px">This app is installed and works offline, and the phone is told to keep this data safe from routine cleanup. But if she ever clears all app/site data by hand, or switches phones, only a backup file protects her bookings — export it regularly.</div>
+        <div style="font-size:12px;color:{{ accent }};font-weight:700;margin-bottom:10px">{{ lastBackupLabel }}</div>
+        <div style="display:flex;gap:10px;margin-bottom:8px">
+          <div onClick="{{ onExport }}" style="flex:1;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:12px;padding:11px;font-weight:600;font-size:13px;color:#5c2340;cursor:pointer">⬇ Export backup</div>
+          <label style="flex:1;text-align:center;background:#fff;border:1.5px solid #e9c6d4;border-radius:12px;padding:11px;font-weight:600;font-size:13px;color:#5c2340;cursor:pointer">
+            ⬆ Import backup
+            <input type="file" accept="application/json" onChange="{{ onImport }}" style="display:none"/>
+          </label>
+        </div>
+        <sc-if value="{{ backupStatus }}" hint-placeholder-val="{{ null }}">
+          <div style="font-size:12px;color:{{ accent }};font-weight:600">{{ backupStatus }}</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <div style="position:absolute;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #f1dbe3;display:flex;padding:10px 8px 14px">
+    <div onClick="{{ goHome }}" style="flex:1;text-align:center;cursor:pointer;color:{{ navColorHome }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin:0 auto"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      <div style="font-size:10.5px;font-weight:600;margin-top:3px">Home</div>
+    </div>
+    <div onClick="{{ goSearch }}" style="flex:1;text-align:center;cursor:pointer;color:{{ navColorSearch }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin:0 auto"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <div style="font-size:10.5px;font-weight:600;margin-top:3px">Search</div>
+    </div>
+    <div onClick="{{ goAdd }}" style="flex:0 0 56px;margin-top:-26px;text-align:center;cursor:pointer">
+      <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,{{ accent }},#f6b9cf);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 18px -6px {{ accent }};margin:0 auto">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+    </div>
+    <div onClick="{{ goEarnings }}" style="flex:1;text-align:center;cursor:pointer;color:{{ navColorEarnings }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin:0 auto"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-6"/></svg>
+      <div style="font-size:10.5px;font-weight:600;margin-top:3px">Insights</div>
+    </div>
+    <div onClick="{{ goInventory }}" style="flex:1;text-align:center;cursor:pointer;color:{{ navColorInventory }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin:0 auto"><path d="M21 8L12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+      <div style="font-size:10.5px;font-weight:600;margin-top:3px">Inventory</div>
+    </div>
+  </div>
+
+  <sc-if value="{{ toast }}" hint-placeholder-val="{{ null }}">
+    <div style="position:absolute;bottom:100px;left:50%;transform:translateX(-50%);background:#3a1a28;color:#fff;font-size:12.5px;font-weight:600;padding:10px 18px;border-radius:20px;animation:toastIn 0.25s ease-out;white-space:nowrap">{{ toast }}</div>
+  </sc-if>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:460,&quot;height&quot;:860},&quot;accentColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#c8577f&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#c8577f&quot;,&quot;#b8557a&quot;,&quot;#a86a9e&quot;,&quot;#c9915a&quot;]},&quot;currencySymbol&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;$&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;₹&quot;,&quot;$&quot;,&quot;£&quot;,&quot;€&quot;]},&quot;travelBufferMinutes&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:45,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:15,&quot;max&quot;:120,&quot;step&quot;:5,&quot;unit&quot;:&quot;min&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+const SERVICES = ['Bridal makeup','Party makeup','Engagement look','Saree draping','Hairstyling','Facial & skincare','Mehendi coordination','Photoshoot makeup','Other'];
+
+function pad(n){ return n<10?'0'+n:''+n; }
+function toDateObj(dateStr,timeStr){
+  if(!dateStr) return null;
+  const [y,m,d]=dateStr.split('-').map(Number);
+  let hh=0,mm=0;
+  if(timeStr){ const [h,mi]=timeStr.split(':').map(Number); hh=h; mm=mi; }
+  return new Date(y,(m||1)-1,d||1,hh,mm);
+}
+function fmtDateLabel(dateStr){
+  if(!dateStr) return '';
+  const d=toDateObj(dateStr,'00:00');
+  return d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+}
+function fmtLeaveBy(dateStr,timeStr,bufferMin){
+  if(!dateStr||!timeStr) return '';
+  const d=toDateObj(dateStr,timeStr);
+  d.setMinutes(d.getMinutes()-bufferMin);
+  return fmtTimeLabel(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+}
+function fmtCountdown(dateStr,timeStr){
+  if(!dateStr||!timeStr) return '';
+  const target=toDateObj(dateStr,timeStr).getTime();
+  const diffMs=target-Date.now();
+  if(diffMs<=0) return 'Happening now';
+  const mins=Math.round(diffMs/60000);
+  if(mins<60) return `in ${mins} min`;
+  const hrs=Math.floor(mins/60), rem=mins%60;
+  if(hrs<24) return `in ${hrs}h ${rem}m`;
+  const days=Math.floor(hrs/24);
+  return `in ${days} day${days===1?'':'s'}`;
+}
+function fmtTimeLabel(timeStr){
+  if(!timeStr) return '';
+  const [h,m]=timeStr.split(':').map(Number);
+  const ampm = h>=12?'PM':'AM';
+  let h12 = h%12; if(h12===0) h12=12;
+  return `${h12}:${pad(m)} ${ampm}`;
+}
+function emptyForm(){
+  return { name:'', phone:'', service:'', date:'', time:'', address:'', price:'', notes:'' };
+}
+const PAYMENT_METHODS = ['Cash','Interac','Card','Other'];
+
+class Component extends DCLogic {
+  state = {
+    appointments: [],
+    screen: 'home',
+    addTab: 'manual',
+    form: emptyForm(),
+    pasteText: '',
+    search: '',
+    detailId: null,
+    toast: null,
+    loaded: false,
+    ocrStatus: null,
+    gbpUrl: '',
+    backupStatus: null,
+    lastBackupAt: null,
+    cloudReady: false,
+    cloudUser: null,
+    authEmail: '',
+    authPassword: '',
+    authMode: 'signin',
+    cloudStatus: null,
+    logPast: false,
+    completingId: null,
+    pendingPrice: '',
+    pendingPaymentMethod: '',
+    reschedulingId: null,
+    resDate: '', resTime: '',
+    inventory: [],
+    invName: '', invQty: '', invThreshold: '', invUnit: ''
+  };
+
+  componentDidMount() {
+    try {
+      const raw = localStorage.getItem('asha_appointments_v1');
+      this.setState({ appointments: raw ? JSON.parse(raw) : [], loaded: true });
+    } catch(e) { this.setState({ appointments: [], loaded: true }); }
+    try {
+      const gbp = localStorage.getItem('asha_gbp_url_v1');
+      if (gbp) this.setState({ gbpUrl: gbp });
+      const lb = localStorage.getItem('asha_last_backup_v1');
+      if (lb) this.setState({ lastBackupAt: +lb });
+      const inv = localStorage.getItem('asha_inventory_v1');
+      this.setState({ inventory: inv ? JSON.parse(inv) : [] });
+    } catch(e) {}
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+    this.initCloud();
+  }
+
+  initCloud() {
+    const cfg = window.ASHA_FIREBASE_CONFIG;
+    if (!cfg || cfg.apiKey === 'PASTE_API_KEY_HERE' || typeof firebase === 'undefined') return;
+    try {
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      this.auth = firebase.auth();
+      this.db = firebase.firestore();
+      this.setState({ cloudReady: true });
+      this.auth.onAuthStateChanged(user => {
+        this.setState({ cloudUser: user ? user.email : null });
+        if (user) this.pullFromCloud(user.uid);
+      });
+    } catch(e) { this.setState({ cloudStatus: 'Cloud backup could not start.' }); }
+  }
+
+  pullFromCloud(uid) {
+    this.db.collection('users').doc(uid).get().then(doc => {
+      if (doc.exists && Array.isArray(doc.data().appointments)) {
+        const d = doc.data();
+        this.setState({ appointments: d.appointments, inventory: Array.isArray(d.inventory) ? d.inventory : this.state.inventory });
+        try {
+          localStorage.setItem('asha_appointments_v1', JSON.stringify(d.appointments));
+          if (Array.isArray(d.inventory)) localStorage.setItem('asha_inventory_v1', JSON.stringify(d.inventory));
+        } catch(e) {}
+        this.setState({ cloudStatus: 'Synced from cloud.' });
+      } else {
+        this.pushToCloud(this.state.appointments, this.state.inventory);
+        this.setState({ cloudStatus: 'Cloud backup ready.' });
+      }
+    }).catch(() => this.setState({ cloudStatus: 'Could not reach cloud backup.' }));
+  }
+
+  pushToCloud(list, inventory) {
+    if (!this.db || !this.auth.currentUser) return;
+    this.db.collection('users').doc(this.auth.currentUser.uid).set({ appointments: list, inventory: inventory || [], updatedAt: Date.now() }).catch(() => {});
+  }
+
+  cloudSignIn(isSignUp) {
+    const { authEmail, authPassword } = this.state;
+    if (!authEmail || !authPassword) { this.setState({ cloudStatus: 'Enter email & password.' }); return; }
+    const action = isSignUp ? this.auth.createUserWithEmailAndPassword(authEmail, authPassword) : this.auth.signInWithEmailAndPassword(authEmail, authPassword);
+    action.then(() => this.setState({ cloudStatus: 'Signed in — syncing…', authPassword: '' }))
+      .catch(err => this.setState({ cloudStatus: err.message }));
+  }
+
+  cloudSignInGoogle() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    this.auth.signInWithPopup(provider)
+      .then(() => this.setState({ cloudStatus: 'Signed in — syncing…' }))
+      .catch(err => this.setState({ cloudStatus: err.message }));
+  }
+
+  cloudSignOut() {
+    this.auth.signOut().then(() => this.setState({ cloudStatus: 'Signed out. Data stays on this phone.' }));
+  }
+
+  onScreenshotFile(e) {
+    const file = e.target.files[0];
+    if (!file || typeof Tesseract === 'undefined') { this.setState({ ocrStatus: 'Could not read image — try pasting the text instead.' }); return; }
+    this.setState({ ocrStatus: 'Reading screenshot…' });
+    Tesseract.recognize(file, 'eng').then(({ data: { text } }) => {
+      this.setState({ pasteText: text, ocrStatus: 'Read successfully — review the fields below.', addTab: 'manual' });
+      this.parseChat();
+    }).catch(() => this.setState({ ocrStatus: 'Could not read that image — try a clearer screenshot.' }));
+  }
+
+  onGbpUrlChange(url) {
+    this.setState({ gbpUrl: url });
+    try { localStorage.setItem('asha_gbp_url_v1', url); } catch(e) {}
+  }
+
+  exportBackup() {
+    try {
+      const blob = new Blob([JSON.stringify(this.state.appointments, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `asha-appointments-backup-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      const now = Date.now();
+      try { localStorage.setItem('asha_last_backup_v1', String(now)); } catch(e) {}
+      this.setState({ backupStatus: 'Backup downloaded to your phone.', lastBackupAt: now });
+    } catch(e) { this.setState({ backupStatus: 'Could not export backup.' }); }
+  }
+
+  importBackup(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error('bad format');
+        this.persist(data);
+        this.setState({ backupStatus: `Restored ${data.length} appointment(s).` });
+      } catch(e) { this.setState({ backupStatus: 'That file could not be read as a backup.' }); }
+    };
+    reader.readAsText(file);
+  }
+
+  persist(list) {
+    this.setState({ appointments: list });
+    try { localStorage.setItem('asha_appointments_v1', JSON.stringify(list)); } catch(e) {}
+    if (this.auth && this.auth.currentUser) this.pushToCloud(list, this.state.inventory);
+  }
+
+  persistInventory(list) {
+    this.setState({ inventory: list });
+    try { localStorage.setItem('asha_inventory_v1', JSON.stringify(list)); } catch(e) {}
+    if (this.auth && this.auth.currentUser) this.pushToCloud(this.state.appointments, list);
+  }
+
+  addInventoryItem() {
+    const { invName, invQty, invThreshold, invUnit } = this.state;
+    if (!invName) { this.showToast('Enter an item name'); return; }
+    const item = { id: 'i_' + Date.now(), name: invName, qty: +invQty || 0, threshold: +invThreshold || 0, unit: invUnit || '' };
+    this.persistInventory([...this.state.inventory, item]);
+    this.setState({ invName: '', invQty: '', invThreshold: '', invUnit: '' });
+    this.showToast('Item added');
+  }
+
+  adjustQty(id, delta) {
+    const list = this.state.inventory.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i);
+    this.persistInventory(list);
+  }
+
+  deleteInventoryItem(id) {
+    this.persistInventory(this.state.inventory.filter(i => i.id !== id));
+  }
+
+  openComplete(id) {
+    const a = this.state.appointments.find(x => x.id === id);
+    this.setState({ completingId: id, pendingPrice: (a && a.price) || '', pendingPaymentMethod: (a && a.paymentMethod) || '' });
+  }
+
+  cancelComplete() { this.setState({ completingId: null }); }
+
+  confirmComplete() {
+    const { completingId, pendingPrice, pendingPaymentMethod } = this.state;
+    if (!pendingPrice || !pendingPaymentMethod) { this.showToast('Enter the price and payment method to complete'); return; }
+    const list = this.state.appointments.map(a => a.id === completingId ? { ...a, status: 'done', price: pendingPrice, paymentMethod: pendingPaymentMethod } : a);
+    this.persist(list);
+    this.setState({ completingId: null, pendingPrice: '', pendingPaymentMethod: '' });
+    this.showToast('Marked as completed');
+  }
+
+  openReschedule(id) {
+    const a = this.state.appointments.find(x => x.id === id);
+    this.setState({ reschedulingId: id, resDate: a.date, resTime: a.time });
+  }
+  cancelReschedule() { this.setState({ reschedulingId: null }); }
+  confirmReschedule() {
+    const { reschedulingId, resDate, resTime } = this.state;
+    if (!resDate || !resTime) { this.showToast('Pick a new date & time'); return; }
+    const list = this.state.appointments.map(a => {
+      if (a.id !== reschedulingId) return a;
+      const history = [...(a.history || []), { date: a.date, time: a.time }];
+      return { ...a, date: resDate, time: resTime, history };
+    });
+    this.persist(list);
+    this.setState({ reschedulingId: null });
+    this.showToast('Appointment rescheduled');
+  }
+
+  cancelAppointment(id) {
+    const list = this.state.appointments.map(a => a.id === id ? { ...a, status: 'cancelled' } : a);
+    this.persist(list);
+    this.setState({ screen: 'home', detailId: null });
+    this.showToast('Appointment cancelled');
+  }
+
+  showToast(msg) {
+    this.setState({ toast: msg });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ toast: null }), 2200);
+  }
+
+  checkOverlap(dateStr, timeStr, excludeId) {
+    if (!dateStr || !timeStr) return false;
+    const target = toDateObj(dateStr, timeStr).getTime();
+    return this.state.appointments.some(a => {
+      if (a.id === excludeId || a.status === 'done') return false;
+      if (!a.date || !a.time) return false;
+      const t = toDateObj(a.date, a.time).getTime();
+      return Math.abs(t - target) < 60 * 60 * 1000;
+    });
+  }
+
+  setField(key, e) {
+    this.setState(s => ({ form: { ...s.form, [key]: e.target.value } }));
+  }
+
+  parseChat() {
+    const text = this.state.pasteText || '';
+    const form = { ...this.state.form };
+    const phoneMatch = text.match(/(\+?\d[\d\s-]{8,13}\d)/);
+    if (phoneMatch) form.phone = phoneMatch[1].replace(/[\s-]/g, '');
+
+    let dateFound = '';
+    const today = new Date();
+    if (/\btomorrow\b/i.test(text)) {
+      const d = new Date(today); d.setDate(d.getDate() + 1);
+      dateFound = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    } else if (/\btoday\b/i.test(text)) {
+      dateFound = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+    } else {
+      const dmy = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+      const dMon = text.match(/(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*(\d{2,4})?/i);
+      if (dmy) {
+        let [, d, m, y] = dmy;
+        if (y.length === 2) y = '20' + y;
+        dateFound = `${y}-${pad(+m)}-${pad(+d)}`;
+      } else if (dMon) {
+        const mi = monthNames.indexOf(dMon[2].toLowerCase().slice(0,3)) + 1;
+        const y = dMon[3] ? (dMon[3].length===2?'20'+dMon[3]:dMon[3]) : today.getFullYear();
+        dateFound = `${y}-${pad(mi)}-${pad(+dMon[1])}`;
+      }
+    }
+    if (dateFound) form.date = dateFound;
+
+    const timeMatch = text.match(/(\d{1,2})(:(\d{2}))?\s*(am|pm)/i);
+    const time24 = text.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (timeMatch) {
+      let h = +timeMatch[1];
+      const min = timeMatch[3] ? +timeMatch[3] : 0;
+      const isPM = /pm/i.test(timeMatch[4]);
+      if (isPM && h < 12) h += 12;
+      if (!isPM && h === 12) h = 0;
+      form.time = `${pad(h)}:${pad(min)}`;
+    } else if (time24) {
+      form.time = `${pad(+time24[1])}:${pad(+time24[2])}`;
+    }
+
+    const svc = SERVICES.find(s => text.toLowerCase().includes(s.split(' ')[0].toLowerCase()));
+    if (svc) form.service = svc;
+
+    const addrMatch = text.match(/(?:at|address[:\s]+)([A-Za-z0-9,.\s]{5,60})(?:[.,]|call|\d{9,}|$)/i);
+    if (addrMatch) form.address = addrMatch[1].trim();
+
+    const firstLine = text.split(/\n|,/)[0].trim();
+    if (firstLine && firstLine.length < 40 && !form.name) form.name = firstLine.replace(/^hi\s*asha[,!\s]*/i, '').trim() || form.name;
+
+    this.setState({ form, addTab: 'manual' });
+    this.showToast('Parsed — please check the details below');
+  }
+
+  saveAppointment() {
+    const f = this.state.form;
+    if (!f.name || !f.date || !f.time) {
+      this.showToast('Please add name, date & time');
+      return;
+    }
+    if (this.state.logPast && (!f.price || !this.state.pendingPaymentMethod)) {
+      this.showToast('Add the price & payment method to log this visit');
+      return;
+    }
+    const id = 'a_' + Date.now();
+    const record = this.state.logPast
+      ? { id, status: 'done', paymentMethod: this.state.pendingPaymentMethod, ...f }
+      : { id, status: 'upcoming', ...f };
+    const list = [...this.state.appointments, record];
+    this.persist(list);
+    this.setState({ form: emptyForm(), pasteText: '', screen: 'home', addTab: 'manual', logPast: false, pendingPaymentMethod: '' });
+    this.showToast(this.state.logPast ? 'Past visit logged' : 'Appointment saved');
+  }
+
+  deleteAppointment(id) {
+    this.persist(this.state.appointments.filter(a => a.id !== id));
+    this.setState({ screen: 'home', detailId: null });
+    this.showToast('Appointment deleted');
+  }
+
+  gcalLink(a) {
+    const start = toDateObj(a.date, a.time);
+    const end = new Date(start.getTime() + 90 * 60000);
+    const fmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    const details = encodeURIComponent(`${a.service || 'Appointment'}${a.notes ? ' — ' + a.notes : ''}`);
+    const text = encodeURIComponent(`${a.name} — ${a.service || 'Appointment'}`);
+    const loc = encodeURIComponent(a.address || '');
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${fmt(start)}/${fmt(end)}&details=${details}&location=${loc}`;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const accent = this.props.accentColor || '#c8577f';
+    const currency = this.props.currencySymbol || '₹';
+    const upcoming = s.appointments.filter(a => a.status !== 'done' && a.status !== 'cancelled' && a.date).sort((a,b) => toDateObj(a.date,a.time) - toDateObj(b.date,b.time));
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+
+    const withMeta = list => list.map(a => ({
+      ...a,
+      dateLabel: fmtDateLabel(a.date),
+      timeLabel: fmtTimeLabel(a.time),
+      priceLabel: a.price ? `${currency}${a.price}` : '',
+      openFn: () => this.setState({ screen: 'detail', detailId: a.id }),
+      overlap: this.checkOverlap(a.date, a.time, a.id),
+      statusLabel: a.status === 'done' ? 'Done' : a.status === 'cancelled' ? 'Cancelled' : 'Upcoming',
+      statusColor: a.status === 'done' ? '#3a8f5c' : a.status === 'cancelled' ? '#a5637d' : accent
+    }));
+
+    const todayList = withMeta(upcoming.filter(a => a.date === todayStr));
+    const upcomingList = withMeta(upcoming.filter(a => a.date !== todayStr));
+    const hasOverlap = todayList.concat(upcomingList).some(a => a.overlap);
+
+    const daysSinceBackup = s.lastBackupAt ? Math.floor((now - s.lastBackupAt) / 86400000) : null;
+    const needsBackupNag = (upcoming.length > 0) && (daysSinceBackup === null || daysSinceBackup >= 7);
+    const backupNagLabel = daysSinceBackup === null ? "You've never backed up — protect her bookings in 10 seconds." : `Last backup ${daysSinceBackup} day${daysSinceBackup===1?'':'s'} ago — back up again.`;
+
+    const inventoryList = s.inventory.map(i => ({
+      ...i,
+      lowStock: i.threshold > 0 && i.qty <= i.threshold,
+      incFn: () => this.adjustQty(i.id, 1),
+      decFn: () => this.adjustQty(i.id, -1),
+      deleteFn: () => this.deleteInventoryItem(i.id)
+    }));
+    const lowStockItems = inventoryList.filter(i => i.lowStock);
+
+    const bufferMin = this.props.travelBufferMinutes ?? 45;
+    const nextRaw = upcoming[0];
+    const nextAppt = nextRaw ? {
+      ...withMeta([nextRaw])[0],
+      countdown: fmtCountdown(nextRaw.date, nextRaw.time),
+      leaveByLabel: fmtLeaveBy(nextRaw.date, nextRaw.time, bufferMin)
+    } : null;
+
+    const searchQ = (s.search || '').toLowerCase();
+    const searchResults = searchQ ? withMeta(s.appointments.filter(a =>
+      (a.name || '').toLowerCase().includes(searchQ) || (a.phone || '').includes(searchQ)
+    ).sort((a,b) => toDateObj(b.date||'1970-01-01', b.time||'00:00') - toDateObj(a.date||'1970-01-01', a.time||'00:00'))) : [];
+
+    const completed = s.appointments.filter(a => a.status === 'done');
+    const weekAgo = new Date(now.getTime() - 7*86400000);
+    const weekTotal = completed.filter(a => a.date && toDateObj(a.date,'00:00') >= weekAgo).reduce((sum,a) => sum + (+a.price || 0), 0);
+    const completedList = withMeta(completed.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
+
+    const byKey = (arr, keyFn) => { const m = new Map(); arr.forEach(a => { const k = keyFn(a); if (!k) return; const e = m.get(k) || { key: k, count: 0, revenue: 0 }; e.count++; e.revenue += (+a.price || 0); m.set(k, e); }); return [...m.values()]; };
+    const topClients = byKey(completed, a => a.name).sort((a,b) => b.revenue - a.revenue).slice(0,5)
+      .map(c => ({ label: c.key, sub: `${c.count} visit${c.count===1?'':'s'}`, valueLabel: `${currency}${c.revenue}` }));
+    const topServices = byKey(completed, a => a.service).sort((a,b) => b.count - a.count).slice(0,5)
+      .map(sv => ({ label: sv.key || 'Other', sub: `${currency}${sv.revenue} total`, valueLabel: `${sv.count}×` }));
+    const paymentBreakdown = byKey(completed, a => a.paymentMethod).sort((a,b) => b.revenue - a.revenue)
+      .map(p => ({ label: p.key || 'Unrecorded', valueLabel: `${currency}${p.revenue}` }));
+
+    const detailRec = s.detailId ? s.appointments.find(a => a.id === s.detailId) : null;
+    const detail = detailRec ? {
+      ...detailRec,
+      dateLabel: fmtDateLabel(detailRec.date),
+      timeLabel: fmtTimeLabel(detailRec.time),
+      priceLabel: detailRec.price ? `${currency}${detailRec.price}` : '',
+      done: detailRec.status === 'done',
+      telLink: `tel:${detailRec.phone || ''}`,
+      waLink: `https://wa.me/${(detailRec.phone||'').replace(/\D/g,'')}`,
+      mapLink: `https://maps.google.com/?q=${encodeURIComponent(detailRec.address || '')}`,
+      gcalLink: this.gcalLink(detailRec),
+      cancelled: detailRec.status === 'cancelled',
+      history: (detailRec.history || []).map(h => ({ dateLabel: fmtDateLabel(h.date), timeLabel: fmtTimeLabel(h.time) }))
+    } : {};
+
+    const formOverlapWarning = this.checkOverlap(s.form.date, s.form.time, null);
+    const inputStyle = 'width:100%;border:1.5px solid #f1dbe3;border-radius:12px;padding:11px 12px;font-size:13.5px;color:#5c2340;outline:none;background:#fff';
+
+    const navBase = '#d9a9bb', navActive = accent;
+
+    return {
+      accent, currency,
+      headerSubtitle: s.screen === 'home' ? `${upcoming.length} upcoming booking${upcoming.length===1?'':'s'}` :
+        s.screen === 'add' ? 'Add a new booking' : s.screen === 'search' ? 'Find a client' :
+        s.screen === 'earnings' ? 'Your work summary' : 'Booking details',
+      hasOverlap, nextAppt, bufferMin, needsBackupNag, backupNagLabel,
+      noToday: todayList.length === 0, noUpcoming: upcomingList.length === 0,
+      noSearchResults: searchResults.length === 0, hasSearchQuery: searchQ.length > 0,
+      noCompleted: completedList.length === 0,
+      cloudNotReady: !s.cloudReady, noCloudUser: !s.cloudUser,
+      lastBackupLabel: daysSinceBackup === null ? 'Never backed up yet' : daysSinceBackup === 0 ? 'Backed up today' : `Last backup ${daysSinceBackup} day${daysSinceBackup===1?'':'s'} ago`,
+      todayLabel: now.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'}),
+      todayList, upcomingList,
+      isHome: s.screen === 'home', isAdd: s.screen === 'add', isSearch: s.screen === 'search',
+      isEarnings: s.screen === 'earnings', isDetail: s.screen === 'detail', isSettings: s.screen === 'settings',
+      isInventory: s.screen === 'inventory',
+      inventoryList, hasInventory: inventoryList.length > 0, lowStockCount: lowStockItems.length,
+      hasLowStock: lowStockItems.length > 0,
+      invName: s.invName, invQty: s.invQty, invThreshold: s.invThreshold, invUnit: s.invUnit,
+      onInvNameChange: e => this.setState({ invName: e.target.value }),
+      onInvQtyChange: e => this.setState({ invQty: e.target.value }),
+      onInvThresholdChange: e => this.setState({ invThreshold: e.target.value }),
+      onInvUnitChange: e => this.setState({ invUnit: e.target.value }),
+      onAddInventory: () => this.addInventoryItem(),
+      goInventory: () => this.setState({ screen: 'inventory' }),
+      navColorInventory: s.screen === 'inventory' ? navActive : navBase,
+
+      manualTabBg: s.addTab === 'manual' ? accent : 'transparent',
+      manualTabColor: s.addTab === 'manual' ? '#fff' : '#a5637d',
+      pasteTabBg: s.addTab === 'paste' ? accent : 'transparent',
+      pasteTabColor: s.addTab === 'paste' ? '#fff' : '#a5637d',
+      screenshotTabBg: s.addTab === 'screenshot' ? accent : 'transparent',
+      screenshotTabColor: s.addTab === 'screenshot' ? '#fff' : '#a5637d',
+      isPasteTab: s.addTab === 'paste', isScreenshotTab: s.addTab === 'screenshot',
+      setTabManual: () => this.setState({ addTab: 'manual' }),
+      setTabPaste: () => this.setState({ addTab: 'paste' }),
+      setTabScreenshot: () => this.setState({ addTab: 'screenshot', ocrStatus: null }),
+      pasteText: s.pasteText,
+      onPasteChange: e => this.setState({ pasteText: e.target.value }),
+      onParse: () => this.parseChat(),
+      ocrStatus: s.ocrStatus,
+      onScreenshotChange: e => this.onScreenshotFile(e),
+
+      goSettings: () => this.setState({ screen: 'settings' }),
+      gbpUrl: s.gbpUrl,
+      onGbpUrlChange: e => this.onGbpUrlChange(e.target.value),
+      gbpOpenLink: s.gbpUrl || 'https://business.google.com/',
+      onExport: () => this.exportBackup(),
+      onImport: e => this.importBackup(e),
+      backupStatus: s.backupStatus,
+
+      cloudReady: s.cloudReady, cloudUser: s.cloudUser, cloudStatus: s.cloudStatus,
+      authEmail: s.authEmail, authPassword: s.authPassword,
+      isAuthSignup: s.authMode === 'signup',
+      authSubmitLabel: s.authMode === 'signup' ? 'Create account' : 'Sign in',
+      onAuthEmailChange: e => this.setState({ authEmail: e.target.value }),
+      onAuthPasswordChange: e => this.setState({ authPassword: e.target.value }),
+      setAuthSignin: () => this.setState({ authMode: 'signin' }),
+      setAuthSignup: () => this.setState({ authMode: 'signup' }),
+      authTabSigninBg: s.authMode === 'signin' ? accent : 'transparent',
+      authTabSigninColor: s.authMode === 'signin' ? '#fff' : '#a5637d',
+      authTabSignupBg: s.authMode === 'signup' ? accent : 'transparent',
+      authTabSignupColor: s.authMode === 'signup' ? '#fff' : '#a5637d',
+      onCloudSubmit: () => this.cloudSignIn(s.authMode === 'signup'),
+      onGoogleSignIn: () => this.cloudSignInGoogle(),
+      onCloudSignOut: () => this.cloudSignOut(),
+
+      form: s.form, serviceOptions: SERVICES, inputStyle,
+      priceHint: s.logPast ? '' : '(optional)',
+      logPast: s.logPast, toggleLogPast: () => this.setState({ logPast: !s.logPast }),
+      logPastCheckBg: s.logPast ? accent : 'transparent',
+      setField_name: e => this.setField('name', e),
+      setField_phone: e => this.setField('phone', e),
+      setField_service: e => this.setField('service', e),
+      setField_date: e => this.setField('date', e),
+      setField_time: e => this.setField('time', e),
+      setField_address: e => this.setField('address', e),
+      setField_price: e => this.setField('price', e),
+      setField_notes: e => this.setField('notes', e),
+      formOverlapWarning,
+      onSave: () => this.saveAppointment(),
+
+      searchQuery: s.search, onSearchChange: e => this.setState({ search: e.target.value }),
+      searchResults, searchEmptyLabel: searchQ ? 'No matching clients found.' : 'Type a name or phone number to search.',
+
+      weekTotal, completedCount: completed.length, completedList,
+      topClients, hasTopClients: topClients.length > 0,
+      topServices, hasTopServices: topServices.length > 0,
+      paymentBreakdown, hasPaymentBreakdown: paymentBreakdown.length > 0,
+
+      detail, notDone: !detail.done && !detail.cancelled,
+      isCompletingThis: s.completingId === s.detailId,
+      isReschedulingThis: s.reschedulingId === s.detailId,
+      showActionRow: !detail.done && !detail.cancelled && s.completingId !== s.detailId && s.reschedulingId !== s.detailId,
+      hasHistory: (detail.history || []).length > 0,
+      goBack: () => this.setState({ screen: 'home', detailId: null }),
+      openComplete: () => this.openComplete(s.detailId),
+      cancelComplete: () => this.cancelComplete(),
+      confirmComplete: () => this.confirmComplete(),
+      pendingPrice: s.pendingPrice, onPendingPriceChange: e => this.setState({ pendingPrice: e.target.value }),
+      paymentOptions: PAYMENT_METHODS.map(m => ({
+        label: m, bg: s.pendingPaymentMethod === m ? accent : '#fff',
+        color: s.pendingPaymentMethod === m ? '#fff' : '#5c2340',
+        selectFn: () => this.setState({ pendingPaymentMethod: m })
+      })),
+      openReschedule: () => this.openReschedule(s.detailId),
+      cancelReschedule: () => this.cancelReschedule(),
+      confirmReschedule: () => this.confirmReschedule(),
+      resDate: s.resDate, resTime: s.resTime,
+      onResDateChange: e => this.setState({ resDate: e.target.value }),
+      onResTimeChange: e => this.setState({ resTime: e.target.value }),
+      onCancelAppt: () => this.cancelAppointment(s.detailId),
+      deleteAppt: () => this.deleteAppointment(s.detailId),
+
+      goHome: () => this.setState({ screen: 'home' }),
+      goAdd: () => this.setState({ screen: 'add' }),
+      goSearch: () => this.setState({ screen: 'search' }),
+      goEarnings: () => this.setState({ screen: 'earnings' }),
+      navColorHome: s.screen === 'home' ? navActive : navBase,
+      navColorSearch: s.screen === 'search' ? navActive : navBase,
+      navColorEarnings: s.screen === 'earnings' ? navActive : navBase,
+
+      toast: s.toast
+    };
+  }
+}
+</script>
+</body>
+</html>
