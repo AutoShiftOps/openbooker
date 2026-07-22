@@ -48,6 +48,7 @@ BASE_URL=http://localhost:5000 node 07-search-phone-normalization.test.js
 | `14-backup-completeness-and-safety.test.js` | Regression: backup export/import covering inventory+services+clients (not just appointments), delete confirmations for appointment/inventory, and non-numeric price rejection |
 | `15-day-off-blocking.test.js` | Marking/unmarking a day off from the Calendar (grid marker, hides availability list, existing bookings still show), Add screen warns (doesn't block) if the picked date is marked off |
 | `16-business-profile.test.js` | Owner-editable Business details settings (name/tagline/location live in the header, accent color updates CSS vars at runtime, currency shows in Earnings, business hours change the Add screen's slot count, all of it persists across a reload) |
+| `17-logo-upload.test.js` | Owner-uploaded business logo: auto-crop/resize to a data URI, header image + browser tab favicon update live, persists across reload, "Remove logo" reverts to the text-only header and default favicon |
 
 ## Adding a new test
 

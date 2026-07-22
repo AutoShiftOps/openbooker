@@ -17,8 +17,11 @@ const DEFAULT_BUSINESS_PROFILE = {
   travelBufferMin: 45,
   appointmentDurationMin: 90, // assumed length; also used for calendar-export end times
   defaultAddress: '339 Rathburn Rd W, Mississauga, ON L5B 0K6', // home base -- overridable per booking when she travels to a client instead
+  logoDataUrl: '', // owner-uploaded logo, auto-cropped to a square PNG data URI; empty = text-only header
   updatedAt: 0
 };
+
+const LOGO_SIZE_PX = 256; // stored/display resolution -- sharp enough for a retina header badge and the browser tab favicon
 
 // Web Push "VAPID" public key -- generate in Firebase Console: Project Settings ->
 // Cloud Messaging -> Web Push certificates -> Generate key pair. Paste the value
@@ -49,6 +52,11 @@ function applyAccentColors(accent, accentSoft){
   const root = document.documentElement.style;
   root.setProperty('--accent', accent);
   root.setProperty('--accent-soft', accentSoft);
+}
+
+function applyFavicon(dataUrl){
+  const link = document.getElementById('favicon-link');
+  if (link) link.href = dataUrl || './icons/icon-192.png';
 }
 
 // ---- Pure business logic (dates, formatting, parsing, analytics) ----
@@ -507,6 +515,7 @@ function loadPersisted(){
   // unlike at the top-level state literal where it doesn't exist yet.
   state.form = emptyForm();
   applyAccentColors(state.businessProfile.accent, state.businessProfile.accentSoft);
+  applyFavicon(state.businessProfile.logoDataUrl);
 }
 
 function persist(list){
@@ -544,6 +553,7 @@ function persistBusinessProfile(profile){
   state.businessProfile = profile;
   try { localStorage.setItem(LS_KEYS.businessProfile, JSON.stringify(profile)); } catch(e) {}
   applyAccentColors(profile.accent, profile.accentSoft);
+  applyFavicon(profile.logoDataUrl);
   pushToCloud();
   scheduleRender();
 }
@@ -597,6 +607,7 @@ function pullFromCloud(uid){
         localStorage.setItem(LS_KEYS.businessProfile, JSON.stringify(businessProfile));
       } catch(e) {}
       applyAccentColors(businessProfile.accent, businessProfile.accentSoft);
+      applyFavicon(businessProfile.logoDataUrl);
       // Push the reconciled result back up so both sides converge on the same data.
       pushToCloud();
       setState({ cloudStatus: 'Synced from cloud.' });
@@ -799,6 +810,35 @@ function onScreenshotFile(file){
     setState({ pasteText: text, ocrStatus: 'Read successfully — review the fields below.', addTab: 'manual', form });
     showToast('Parsed — please check the details below');
   }).catch(() => setState({ ocrStatus: 'Could not read that image — try a clearer screenshot.' }));
+}
+
+// Auto-crops whatever she uploads to a centered square and downsizes it to a
+// fixed resolution -- no drag/pinch crop UI, just fit-and-crop, so a logo that's
+// already roughly square looks right and a wider photo loses its edges instead
+// of stretching.
+function onLogoFile(file){
+  if (!file || !file.type || file.type.indexOf('image/') !== 0) { showToast('Please choose an image file.'); return; }
+  const reader = new FileReader();
+  reader.onerror = () => showToast('Could not read that image.');
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => showToast('Could not read that image.');
+    img.onload = () => {
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = LOGO_SIZE_PX; canvas.height = LOGO_SIZE_PX;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, LOGO_SIZE_PX, LOGO_SIZE_PX);
+      const dataUrl = canvas.toDataURL('image/png');
+      persistBusinessProfile({ ...state.businessProfile, logoDataUrl: dataUrl });
+      showToast('Logo updated');
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 const Actions = {
@@ -1041,7 +1081,11 @@ const Actions = {
   onGoogleSignIn: () => cloudSignInGoogle(),
   onCloudSignOut: () => cloudSignOut(),
   onEnablePush: () => enablePushReminders(),
-  onDisablePush: () => disablePushReminders()
+  onDisablePush: () => disablePushReminders(),
+  removeLogo: () => {
+    persistBusinessProfile({ ...state.businessProfile, logoDataUrl: '' });
+    showToast('Logo removed');
+  }
 };
 
 // ---- Computed view-model (mirrors the original renderVals()) ----
@@ -1216,6 +1260,7 @@ function renderHeader(v){
   <header class="app-header">
     <button class="calendar-btn" data-action="goCalendar" aria-label="Calendar">${ICON_CALENDAR}</button>
     <button class="settings-btn" data-action="goSettings" aria-label="Settings">${ICON_GEAR}</button>
+    ${bp.logoDataUrl ? `<img class="header-logo" src="${esc(bp.logoDataUrl)}" alt="${esc(bp.name)} logo"/>` : ''}
     <div class="wordmark">${esc(bp.name)}</div>
     <div class="header-divider"></div>
     <div class="header-tagline">${esc(bp.tagline)}</div>
@@ -1688,6 +1733,16 @@ function renderSettings(v){
   const bp = s.businessProfile;
   html += `<div class="section-title">Business details</div>
   <div class="hint-text">Shown in the header and used as booking defaults -- update any time.</div>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+    ${bp.logoDataUrl
+      ? `<img src="${esc(bp.logoDataUrl)}" alt="Current logo" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:1px solid rgba(0,0,0,0.08);flex-shrink:0"/>`
+      : `<div style="width:56px;height:56px;border-radius:50%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:#999;text-align:center;flex-shrink:0">No logo</div>`}
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label class="action-btn-secondary" style="padding:8px 14px">${bp.logoDataUrl ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/*" data-action="onLogoChange" style="display:none"/></label>
+      ${bp.logoDataUrl ? `<div class="signout-link" style="margin-bottom:0" data-action="removeLogo">Remove logo</div>` : ''}
+    </div>
+  </div>
+  <div class="hint-text" style="margin-bottom:10px">Auto-cropped to a square, shown in the header and as the browser tab icon.</div>
   <input class="field" style="margin-bottom:8px" data-bind="businessProfile.name" value="${esc(bp.name)}" placeholder="Business name"/>
   <input class="field" style="margin-bottom:8px" data-bind="businessProfile.tagline" value="${esc(bp.tagline)}" placeholder="Tagline"/>
   <input class="field" style="margin-bottom:8px" data-bind="businessProfile.location" value="${esc(bp.location)}" placeholder="Location (city, province)"/>
@@ -1886,7 +1941,7 @@ root.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
-  if (action === 'onScreenshotChange' || action === 'onImportBackup') return;
+  if (action === 'onScreenshotChange' || action === 'onImportBackup' || action === 'onLogoChange') return;
   const fn = Actions[action];
   if (!fn) return;
   e.preventDefault();
@@ -1929,6 +1984,7 @@ root.addEventListener('change', e => {
     const file = el.files && el.files[0];
     if (action === 'onScreenshotChange') onScreenshotFile(file);
     if (action === 'onImportBackup') importBackupFile(file);
+    if (action === 'onLogoChange') onLogoFile(file);
     el.value = '';
     return;
   }
