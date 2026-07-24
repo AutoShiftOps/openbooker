@@ -7,6 +7,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -23,6 +24,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.click('[data-action="goSearch"]');
   await page.waitForSelector('.section-title');
 
@@ -39,6 +41,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   assert.ok(checkboxClass.includes('checkbox-box--checked'));
 
   await page.reload({ waitUntil: 'load' });
+  await bypassGate(page);
   await page.click('[data-action="goSearch"]');
   await page.waitForSelector('.checkbox-box');
   checkboxClass = await page.locator('.checkbox-box').first().getAttribute('class');

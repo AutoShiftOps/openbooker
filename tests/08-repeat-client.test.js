@@ -5,6 +5,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -15,12 +16,13 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
 
   await page.addInitScript(() => {
     localStorage.setItem('asha_appointments_v1', JSON.stringify([
-      { id: 'a1', name: 'Priya Sharma', phone: '416-555-0199', services: ['Bridal makeup','Hairstyling'], date: '2026-07-01', time: '10:00', address: '123 Maple St', price: '250', paymentMethod: 'Cash', notes: '', status: 'done' },
-      { id: 'a2', name: 'Jane Doe', phone: '416-555-0200', service: 'Facial & skincare', date: '2026-07-10', time: '11:00', address: '456 Oak Ave', price: '', notes: '', status: 'upcoming' },
+      { id: 'a1', name: 'Priya Sharma', phone: '416-555-0199', services: ['Consultation','Standard appointment'], date: '2026-07-01', time: '10:00', address: '123 Maple St', price: '250', paymentMethod: 'Cash', notes: '', status: 'done' },
+      { id: 'a2', name: 'Jane Doe', phone: '416-555-0200', service: 'Standard appointment', date: '2026-07-10', time: '11:00', address: '456 Oak Ave', price: '', notes: '', status: 'upcoming' },
     ]));
   });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
 
   await page.click('[data-action="goAdd"]');
   await page.waitForSelector('.payment-chip[data-action="pickRecentClient"]');
@@ -33,7 +35,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   assert.strictEqual(await page.locator('#field-phone').inputValue(), '416-555-0199');
   assert.strictEqual(await page.locator('#field-address').inputValue(), '123 Maple St');
   const activeChips = await page.locator('.payment-chip--active').allTextContents();
-  assert.ok(activeChips.includes('Bridal makeup') && activeChips.includes('Hairstyling'));
+  assert.ok(activeChips.includes('Consultation') && activeChips.includes('Standard appointment'));
 
   await page.click('[data-action="goSearch"]');
   await page.fill('#search-input', 'priya');
@@ -47,7 +49,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   assert.strictEqual(await page.locator('#field-phone').inputValue(), '416-555-0199');
   assert.strictEqual(await page.locator('#field-date').inputValue(), '', 'date/time should be blank for a fresh booking');
   const rebookChips = await page.locator('.payment-chip--active').allTextContents();
-  assert.ok(rebookChips.includes('Bridal makeup') && rebookChips.includes('Hairstyling'));
+  assert.ok(rebookChips.includes('Consultation') && rebookChips.includes('Standard appointment'));
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 08-repeat-client');

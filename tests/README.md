@@ -1,4 +1,4 @@
-# SAMakeovers regression suite
+# openbooker regression suite
 
 Playwright-driven browser tests for the app in the parent folder (`../index.html`
 + `../app.js`). No build step for the app itself, and no test framework
@@ -49,6 +49,11 @@ BASE_URL=http://localhost:5000 node 07-search-phone-normalization.test.js
 | `15-day-off-blocking.test.js` | Marking/unmarking a day off from the Calendar (grid marker, hides availability list, existing bookings still show), Add screen warns (doesn't block) if the picked date is marked off |
 | `16-business-profile.test.js` | Owner-editable Business details settings (name/tagline/location live in the header, accent color updates CSS vars at runtime, currency shows in Earnings, business hours change the Add screen's slot count, all of it persists across a reload) |
 | `17-logo-upload.test.js` | Owner-uploaded business logo: auto-crop/resize to a data URI, header image + browser tab favicon update live, persists across reload, "Remove logo" reverts to the text-only header and default favicon |
+| `18-auth-gate.test.js` | SaaS build's mandatory sign-in gate (`REQUIRE_AUTH`): normal app/nav unreachable while signed out, Terms/Privacy consent required before submitting either sign-in path, sign-in/create-account tab switching |
+| `19-onboarding-wizard.test.js` | Regression: a brand new tenant (fresh Firestore doc) must fill in their own business details before their first cloud write, instead of inheriting `DEFAULT_BUSINESS_PROFILE`'s seed values; business-name-required validation; finishing the wizard unlocks the app |
+| `20-subscription-paywall.test.js` | Subscription paywall gate: blocks the app without an entitled subscription, `trialing` counts as entitled (not just `active`), `past_due`/`canceled` show the right banner, becoming entitled unlocks the app live without a reload |
+| `21-timezone-setting.test.js` | Per-tenant timezone `<select>` in Business details persists across reload (the Cloud Function side -- reading it per-tenant instead of a hardcoded zone -- isn't reachable from this harness) |
+| `22-existing-data-migration-safety.test.js` | Regression: an existing installer with real local data (not a blank slate) who signs in for the first time under mandatory auth must NOT be routed into the onboarding wizard -- their existing business profile/appointments sync up as-is instead |
 
 ## Adding a new test
 
@@ -58,3 +63,13 @@ for `data-action=` to see what's available), assert with `assert`, and end
 with the same `.catch(e => { console.error(...); process.exit(1); })` pattern
 so `run-all.js` can detect failure. Name it `NN-description.test.js` so it
 sorts sensibly and `run-all.js` picks it up automatically.
+
+This is a SaaS build (`REQUIRE_AUTH = true` in `app.js`) -- every real screen
+sits behind sign-in + onboarding + an entitled subscription (see
+`renderEntitlementGate()`). Unless your test is specifically about that gate
+(like 18-20 above), call `const { bypassGate } = require('./lib/bypassGate');`
+and `await bypassGate(page);` right after `page.goto()` to skip straight past
+it into a fully set-up test tenant. Call it again after any `page.reload()` --
+the gate's in-memory state doesn't survive a reload, but bypassGate is
+idempotent about `businessProfile` (see its own comments) so it won't clobber
+real values an earlier part of your test persisted.

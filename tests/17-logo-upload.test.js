@@ -5,6 +5,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 const SAMPLE_IMAGE = path.join(__dirname, '..', 'icons', 'icon-512.png');
 
 (async () => {
@@ -15,6 +16,7 @@ const SAMPLE_IMAGE = path.join(__dirname, '..', 'icons', 'icon-512.png');
   page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
 
   // No logo yet: no header image, default favicon file.
@@ -50,6 +52,7 @@ const SAMPLE_IMAGE = path.join(__dirname, '..', 'icons', 'icon-512.png');
 
   // Survives a reload (localStorage, not just in-memory state).
   await page.reload({ waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
   assert.strictEqual(await page.locator('.header-logo').count(), 1, 'logo should survive a reload');
   const faviconAfterReload = await page.locator('#favicon-link').getAttribute('href');

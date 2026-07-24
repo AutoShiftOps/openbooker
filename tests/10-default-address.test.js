@@ -4,6 +4,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -13,10 +14,11 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.click('[data-action="goAdd"]');
   await page.waitForSelector('#field-address');
   const addressVal = await page.locator('#field-address').inputValue();
-  assert.strictEqual(addressVal, '339 Rathburn Rd W, Mississauga, ON L5B 0K6');
+  assert.strictEqual(addressVal, '123 Test St, Testville, ON A1A 1A1');
 
   await page.fill('#field-address', "Client's house, 22 Elm St");
   const overridden = await page.locator('#field-address').inputValue();

@@ -4,5 +4,13 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
+    // Subscription status is server-authoritative -- only the Stripe webhook
+    // (via the Admin SDK, which bypasses these rules entirely) may ever write
+    // it. A client can read its own status to drive the paywall, but must
+    // never be able to grant itself entitlement directly.
+    match /subscriptions/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
   }
 }

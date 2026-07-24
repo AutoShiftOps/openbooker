@@ -7,6 +7,7 @@
 // not exercise the bug at all.
 const { chromium } = require('playwright');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -15,6 +16,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.click('[data-action="goAdd"]');
   await page.waitForSelector('#field-name');
   await page.fill('#field-name', 'Race Test');

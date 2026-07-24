@@ -1,23 +1,34 @@
-/* Asha's Bookings — SAMakeovers appointment app
+/* openbooker — multi-tenant appointment booking SaaS
    Vanilla JS SPA: single state object, full re-render on change, event delegation.
-   Business logic (dates, parsing, overlap, analytics, Firebase sync) ported from
-   the original .dc.html prototype essentially as-is. */
+   Forked from a single-tenant prototype built for one real business; this build
+   requires a signed-in, onboarded, subscribed account per tenant (see REQUIRE_AUTH
+   below) instead of working fully offline/local-first out of the box. */
 
-// ---- Business profile (owner-customizable in Settings; these are just the
-// seed defaults so an existing install sees zero change until she edits them) ----
+// SaaS build: every install requires sign-in, a completed onboarding wizard, and
+// an active subscription before the normal app is reachable (see
+// renderEntitlementGate()). This constant doesn't exist in the original
+// single-tenant fork this was forked from -- flipping it to false locally is a
+// convenient dev escape hatch while iterating on unrelated screens.
+const REQUIRE_AUTH = true;
+
+// ---- Business profile (owner-customizable in Settings; a brand new tenant fills
+// these in via the onboarding wizard -- see awaitingOnboarding -- so they should
+// stay neutral placeholders, never a real business's identity) ----
 const DEFAULT_BUSINESS_PROFILE = {
-  name: 'SAMakeovers',
-  tagline: 'FACIALS · SKINCARE · BEAUTY SERVICES',
-  location: 'MISSISSAUGA, ONTARIO',
-  accent: '#3d4a7d',     // deep indigo/purple, sampled from the SAMakeovers Media logo
-  accentSoft: '#12a457', // emerald green, sampled from the logo's core; header/FAB gradient partner
-  currency: '$',         // CAD -- Mississauga, Ontario business
-  hoursStart: 11,
-  hoursEnd: 19,          // 11:00 AM - 7:00 PM, matches Google Business Profile
-  travelBufferMin: 45,
-  appointmentDurationMin: 90, // assumed length; also used for calendar-export end times
-  defaultAddress: '339 Rathburn Rd W, Mississauga, ON L5B 0K6', // home base -- overridable per booking when she travels to a client instead
+  name: '',
+  tagline: '',
+  location: '',
+  accent: '#2563eb',     // openbooker brand blue -- provisional, editable any time in Settings
+  accentSoft: '#0d9488', // openbooker brand teal -- provisional, editable any time in Settings
+  currency: '$',
+  hoursStart: 9,
+  hoursEnd: 17,
+  travelBufferMin: 30,
+  appointmentDurationMin: 60, // assumed length; also used for calendar-export end times
+  defaultAddress: '',
   logoDataUrl: '', // owner-uploaded logo, auto-cropped to a square PNG data URI; empty = text-only header
+  timezone: 'America/Toronto', // overwritten with the browser's detected zone at onboarding time
+  onboarded: false,
   updatedAt: 0
 };
 
@@ -28,8 +39,25 @@ const LOGO_SIZE_PX = 256; // stored/display resolution -- sharp enough for a ret
 // here (this one is public by design, safe to ship client-side, unlike an API key).
 const VAPID_KEY = 'BEm07yLb3A4FD8a2RggNcZIA-SbuG8fZzDccgtxghLUXVfH6iBsioQPtui32GjjqMsQ4jBZyFbEOB4VJICTr_3g';
 
-const DEFAULT_SERVICES = ['Bridal makeup','Party makeup','Engagement look','Saree draping','Hairstyling','Facial & skincare','Mehendi coordination','Photoshoot makeup','Other'];
+const DEFAULT_SERVICES = ['Consultation','Standard appointment','Other'];
 const PAYMENT_METHODS = ['Cash','Interac','Card','Other'];
+
+// Curated, not exhaustive -- a starting set covering North America plus a few
+// common others. Expand as real tenants ask for a zone that's missing; the
+// select always includes whatever's already stored even if it's not in this
+// list, so nobody's existing setting silently disappears from the dropdown.
+const IANA_TIMEZONES = [
+  'America/Toronto', 'America/New_York', 'America/Chicago', 'America/Denver',
+  'America/Los_Angeles', 'America/Vancouver', 'America/Edmonton', 'America/Winnipeg',
+  'America/Halifax', 'Europe/London', 'Europe/Dublin', 'Australia/Sydney', 'UTC'
+];
+
+function renderTimezoneSelect(bindPath, currentValue){
+  const options = IANA_TIMEZONES.indexOf(currentValue) !== -1 ? IANA_TIMEZONES : [currentValue, ...IANA_TIMEZONES];
+  return `<select class="field" data-bind="${bindPath}">
+    ${options.map(tz => `<option value="${esc(tz)}" ${tz === currentValue ? 'selected' : ''}>${esc(tz)}</option>`).join('')}
+  </select>`;
+}
 
 const LS_KEYS = {
   appointments: 'asha_appointments_v1',
@@ -439,6 +467,10 @@ const state = {
   authEmail: '',
   authPassword: '',
   authMode: 'signin',
+  authConsent: false,
+  awaitingOnboarding: false,
+  onboardingForm: null,
+  subscription: null, // { status: 'trialing'|'active'|'past_due'|'canceled' } once wired to Stripe; null = unknown/not loaded yet
   cloudStatus: null,
   pushStatus: null,
   pushToken: null,
@@ -465,7 +497,7 @@ const state = {
   businessProfile: { ...DEFAULT_BUSINESS_PROFILE }
 };
 
-let auth = null, db = null, toastTimer = null;
+let auth = null, db = null, fns = null, toastTimer = null;
 
 function setState(patch){
   Object.assign(state, typeof patch === 'function' ? patch(state) : patch);
@@ -560,16 +592,27 @@ function persistBusinessProfile(profile){
 
 // ---- Firebase cloud sync (optional; no-ops until firebase-config.js has real keys) ----
 function initCloud(){
-  const cfg = self.ASHA_FIREBASE_CONFIG;
+  const cfg = self.OPENBOOKER_FIREBASE_CONFIG;
   if (!cfg || cfg.apiKey === 'PASTE_API_KEY_HERE' || typeof firebase === 'undefined') return;
   try {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
     auth = firebase.auth();
     db = firebase.firestore();
+    fns = firebase.functions();
     state.cloudReady = true;
     auth.onAuthStateChanged(user => {
       setState({ cloudUser: user ? user.email : null });
-      if (user) pullFromCloud(user.uid);
+      if (user) {
+        pullFromCloud(user.uid);
+        // Realtime (not a one-shot read) so the paywall clears the instant a
+        // Stripe webhook confirms payment, without needing a manual refresh.
+        // Client can only ever READ this doc -- see firestore.rules -- a
+        // trusted server (the webhook) is the only writer.
+        db.collection('subscriptions').doc(user.uid).onSnapshot(
+          doc => setState({ subscription: doc.exists ? doc.data() : null }),
+          () => setState({ subscription: null })
+        );
+      }
     });
   } catch(e) { state.cloudStatus = 'Cloud backup could not start.'; }
 }
@@ -611,9 +654,32 @@ function pullFromCloud(uid){
       // Push the reconciled result back up so both sides converge on the same data.
       pushToCloud();
       setState({ cloudStatus: 'Synced from cloud.' });
-    } else {
+    } else if ((state.businessProfile.name && state.businessProfile.name.trim()) || state.appointments.length > 0) {
+      // No cloud doc yet under this account, but this device already has real
+      // local data -- e.g. an existing installer signing in for the first time
+      // now that accounts are mandatory, migrating onto this account rather
+      // than starting fresh. Sync what's already here instead of showing the
+      // onboarding wizard as if this were a blank slate.
+      setState({ cloudStatus: 'Setting up your account…' });
       pushToCloud();
-      setState({ cloudStatus: 'Cloud backup ready.' });
+    } else {
+      // Genuinely brand new tenant -- deliberately do NOT push anything yet.
+      // Pushing here would silently seed this account with whatever
+      // DEFAULT_BUSINESS_PROFILE/DEFAULT_SERVICES happen to be, instead of the
+      // business's real details. The onboarding wizard's first
+      // persistBusinessProfile() call is what performs this tenant's real
+      // first write.
+      setState({
+        awaitingOnboarding: true,
+        onboardingForm: {
+          name: '', tagline: '', location: '', defaultAddress: '',
+          currency: DEFAULT_BUSINESS_PROFILE.currency,
+          hoursStart: DEFAULT_BUSINESS_PROFILE.hoursStart,
+          hoursEnd: DEFAULT_BUSINESS_PROFILE.hoursEnd,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_BUSINESS_PROFILE.timezone
+        },
+        cloudStatus: 'Let’s set up your business.'
+      });
     }
   }).catch(() => setState({ cloudStatus: 'Could not reach cloud backup.' }));
 }
@@ -625,6 +691,7 @@ function pushToCloud(){
   }).catch(() => {});
 }
 function cloudSignIn(isSignUp){
+  if (!state.authConsent) { setState({ cloudStatus: 'Please agree to the Terms and Privacy Policy first.' }); return; }
   const { authEmail, authPassword } = state;
   if (!authEmail || !authPassword) { setState({ cloudStatus: 'Enter email & password.' }); return; }
   const action = isSignUp ? auth.createUserWithEmailAndPassword(authEmail, authPassword) : auth.signInWithEmailAndPassword(authEmail, authPassword);
@@ -632,6 +699,7 @@ function cloudSignIn(isSignUp){
     .catch(err => setState({ cloudStatus: err.message }));
 }
 function cloudSignInGoogle(){
+  if (!state.authConsent) { setState({ cloudStatus: 'Please agree to the Terms and Privacy Policy first.' }); return; }
   const provider = new firebase.auth.GoogleAuthProvider();
   auth.signInWithPopup(provider)
     .then(() => setState({ cloudStatus: 'Signed in — syncing…' }))
@@ -639,6 +707,26 @@ function cloudSignInGoogle(){
 }
 function cloudSignOut(){
   auth.signOut().then(() => setState({ cloudStatus: 'Signed out. Data stays on this phone.' }));
+}
+
+// ---- Stripe billing (Checkout for a new subscription, Billing Portal for
+// self-serve manage/cancel) -- both just redirect to a Stripe-hosted page; no
+// payment form is ever handled directly by this app. ----
+function startCheckout(){
+  if (!fns) { showToast('Billing isn’t set up yet.'); return; }
+  showToast('Redirecting to checkout…');
+  const returnUrl = window.location.origin + window.location.pathname;
+  fns.httpsCallable('createCheckoutSession')({ successUrl: returnUrl, cancelUrl: returnUrl })
+    .then(res => { window.location.assign(res.data.url); })
+    .catch(err => showToast(err.message || 'Could not start checkout.'));
+}
+function openBillingPortal(){
+  if (!fns) { showToast('Billing isn’t set up yet.'); return; }
+  showToast('Opening billing portal…');
+  const returnUrl = window.location.origin + window.location.pathname;
+  fns.httpsCallable('createPortalSession')({ returnUrl })
+    .then(res => { window.location.assign(res.data.url); })
+    .catch(err => showToast(err.message || 'Could not open billing portal.'));
 }
 
 // ---- Push notifications (automatic 30-min-before reminders) ----
@@ -1085,7 +1173,37 @@ const Actions = {
   removeLogo: () => {
     persistBusinessProfile({ ...state.businessProfile, logoDataUrl: '' });
     showToast('Logo removed');
-  }
+  },
+
+  toggleAuthConsent: () => setState({ authConsent: !state.authConsent }),
+
+  submitOnboarding: () => {
+    const f = state.onboardingForm;
+    const name = (f.name || '').trim();
+    if (!name) { showToast('Business name is required'); return; }
+    const hoursStart = parseInt(f.hoursStart, 10);
+    const hoursEnd = parseInt(f.hoursEnd, 10);
+    const profile = {
+      ...DEFAULT_BUSINESS_PROFILE,
+      name,
+      tagline: (f.tagline || '').trim(),
+      location: (f.location || '').trim(),
+      defaultAddress: (f.defaultAddress || '').trim(),
+      currency: (f.currency || '').trim() || DEFAULT_BUSINESS_PROFILE.currency,
+      hoursStart: isNaN(hoursStart) ? DEFAULT_BUSINESS_PROFILE.hoursStart : hoursStart,
+      hoursEnd: isNaN(hoursEnd) ? DEFAULT_BUSINESS_PROFILE.hoursEnd : hoursEnd,
+      timezone: f.timezone || DEFAULT_BUSINESS_PROFILE.timezone,
+      onboarded: true
+    };
+    persistBusinessProfile(profile);
+    // The Add screen's blank-form default address is only ever built at boot
+    // (see loadPersisted()) -- refresh it now that businessProfile.defaultAddress
+    // has a real value, so it doesn't take a page reload to show up there.
+    setState({ awaitingOnboarding: false, onboardingForm: null, cloudStatus: 'All set!', form: emptyForm() });
+  },
+
+  onSubscribe: () => startCheckout(),
+  onManageBilling: () => openBillingPortal()
 };
 
 // ---- Computed view-model (mirrors the original renderVals()) ----
@@ -1708,27 +1826,11 @@ function renderSettings(v){
   const s = state;
   let html = `<div>
     <div class="back-link" data-action="goHome">&larr; Back</div>
-    <div class="section-title">Cloud backup (free)</div>`;
-  if (!s.cloudReady) {
-    html += `<div class="info-box">Not set up yet. Create a free Firebase project and paste its keys into <b>firebase-config.js</b> to turn this on — then her bookings sync automatically, safe even through a phone change or full reset.</div>`;
-  } else {
-    if (s.cloudUser) {
-      html += `<div class="signed-in-text">Signed in as <b>${esc(s.cloudUser)}</b> — syncing automatically.</div>
-      <div class="signout-link" data-action="onCloudSignOut">Sign out</div>`;
-    } else {
-      html += `<div class="hint-text">Sign in on this phone and the new one with the same account to carry her bookings across, safe from any local data clearing.</div>
-      <div class="google-btn" data-action="onGoogleSignIn">${ICON_GOOGLE} Continue with Google</div>
-      <div class="or-divider">or use email &amp; password</div>
-      <div class="tabs" style="margin-bottom:10px">
-        <div class="tab ${s.authMode==='signin'?'tab--active':''}" data-action="setAuthSignin">Sign in</div>
-        <div class="tab ${s.authMode==='signup'?'tab--active':''}" data-action="setAuthSignup">Create account</div>
-      </div>
-      <input id="auth-email" class="field" type="email" inputmode="email" autocomplete="email" style="margin-bottom:8px" data-bind="authEmail" value="${esc(s.authEmail)}" placeholder="Email"/>
-      <input id="auth-password" type="password" class="field" style="margin-bottom:8px" data-bind="authPassword" value="${esc(s.authPassword)}" placeholder="Password"/>
-      <div class="btn-primary" style="margin-bottom:8px" data-action="onCloudSubmit">${s.authMode==='signup'?'Create account':'Sign in'}</div>`;
-    }
-    if (s.cloudStatus) html += `<div class="cloud-status">${esc(s.cloudStatus)}</div>`;
-  }
+    <div class="section-title">Account</div>
+    <div class="signed-in-text">Signed in as <b>${esc(s.cloudUser)}</b> — syncing automatically.</div>
+    <div class="signout-link" data-action="onCloudSignOut">Sign out</div>
+    ${s.cloudStatus ? `<div class="cloud-status">${esc(s.cloudStatus)}</div>` : ''}
+    <div class="hint-text" style="margin-top:-4px;margin-bottom:16px">Manage your subscription (update card, view invoices, cancel) via <span class="edit-link" data-action="onManageBilling">Manage billing</span>.</div>`;
 
   const bp = s.businessProfile;
   html += `<div class="section-title">Business details</div>
@@ -1759,6 +1861,7 @@ function renderSettings(v){
     <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours start (0-23)</div><input type="number" inputmode="numeric" min="0" max="23" class="field" data-bind="businessProfile.hoursStart" value="${esc(bp.hoursStart)}"/></div>
     <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours end (1-24)</div><input type="number" inputmode="numeric" min="1" max="24" class="field" data-bind="businessProfile.hoursEnd" value="${esc(bp.hoursEnd)}"/></div>
   </div>
+  <div style="margin-bottom:8px"><div class="hint-text" style="margin-bottom:4px">Timezone</div>${renderTimezoneSelect('businessProfile.timezone', bp.timezone)}</div>
   <div style="margin-bottom:22px"><div class="hint-text" style="margin-bottom:4px">Travel buffer between appointments (min)</div><input type="number" inputmode="numeric" class="field" data-bind="businessProfile.travelBufferMin" value="${esc(bp.travelBufferMin)}"/></div>`;
 
   html += `<div class="section-title">Services you offer</div>
@@ -1871,8 +1974,119 @@ function renderScreen(v){
   }
 }
 
+// ---- Auth / onboarding / subscription gate (SaaS build only) ----
+// Every screen above requires a signed-in, onboarded, subscribed account.
+// These render full-screen, replacing header/screen/nav entirely, rather than
+// living inside renderScreen()'s normal cases.
+
+// /subscriptions/{uid} is written only by the Stripe webhook (server-side,
+// Admin SDK) -- see firestore.rules, which refuses any client write to that
+// collection outright. `trialing` counts as entitled so a fresh Checkout
+// session's trial period works before the first real payment. `comp` is a
+// manually-granted exemption (set directly in the Firestore console, never by
+// the app or the webhook) for accounts that shouldn't see a paywall at all --
+// e.g. the business validating this product before it's opened to the public.
+function entitled(subscription){
+  return !!subscription && (subscription.status === 'active' || subscription.status === 'trialing' || subscription.status === 'comp');
+}
+
+function renderGateShell(inner){
+  return `<div class="gate-screen">
+    <header class="app-header">
+      <div class="wordmark">openbooker</div>
+      <div class="header-divider"></div>
+      <div class="header-tagline">APPOINTMENT BOOKING FOR INDEPENDENT PROS</div>
+    </header>
+    <div class="gate-body">${inner}</div>
+    ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ''}
+  </div>`;
+}
+
+function renderCloudMisconfigured(){
+  return `<div class="section-title">Not set up yet</div>
+  <div class="info-box">This install is missing its Firebase configuration — paste your project's keys into <b>firebase-config.js</b> to turn it on.</div>`;
+}
+
+function renderAuthFields(v){
+  const s = state;
+  // Consent applies to both the Google button and the email form below, and to
+  // both tabs -- there's no reliable way to tell whether a Google sign-in is a
+  // brand new account or a returning one before Firebase responds, so this is
+  // deliberately required up front for either path rather than only gating the
+  // "Create account" tab.
+  let html = `<div class="section-title">${s.authMode === 'signup' ? 'Create your account' : 'Sign in'}</div>
+  <label class="hint-text" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;cursor:pointer">
+    <input type="checkbox" data-action="toggleAuthConsent" ${s.authConsent ? 'checked' : ''} style="margin-top:2px;flex-shrink:0"/>
+    <span>I agree to the <a href="./terms.html" target="_blank" rel="noopener">Terms</a> and <a href="./privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+  </label>
+  <div class="google-btn" data-action="onGoogleSignIn">${ICON_GOOGLE} Continue with Google</div>
+  <div class="or-divider">or use email &amp; password</div>
+  <div class="tabs" style="margin-bottom:10px">
+    <div class="tab ${s.authMode==='signin'?'tab--active':''}" data-action="setAuthSignin">Sign in</div>
+    <div class="tab ${s.authMode==='signup'?'tab--active':''}" data-action="setAuthSignup">Create account</div>
+  </div>
+  <input id="auth-email" class="field" type="email" inputmode="email" autocomplete="email" style="margin-bottom:8px" data-bind="authEmail" value="${esc(s.authEmail)}" placeholder="Email"/>
+  <input id="auth-password" type="password" class="field" style="margin-bottom:8px" data-bind="authPassword" value="${esc(s.authPassword)}" placeholder="Password"/>
+  <div class="btn-primary" style="margin-bottom:8px" data-action="onCloudSubmit">${s.authMode==='signup'?'Create account':'Sign in'}</div>`;
+  if (s.cloudStatus) html += `<div class="cloud-status">${esc(s.cloudStatus)}</div>`;
+  return html;
+}
+
+function renderAuthScreen(v){
+  return renderGateShell(renderAuthFields(v));
+}
+
+function renderOnboarding(v){
+  const f = state.onboardingForm;
+  const inner = `<div class="section-title">Set up your business</div>
+  <div class="hint-text" style="margin-bottom:14px">A few details to personalize your account — all editable later in Settings.</div>
+  <input class="field" style="margin-bottom:8px" data-bind="onboardingForm.name" value="${esc(f.name)}" placeholder="Business name"/>
+  <input class="field" style="margin-bottom:8px" data-bind="onboardingForm.tagline" value="${esc(f.tagline)}" placeholder="Tagline (optional)"/>
+  <input class="field" style="margin-bottom:8px" data-bind="onboardingForm.location" value="${esc(f.location)}" placeholder="Location (city, province/state)"/>
+  <input class="field" style="margin-bottom:8px" data-bind="onboardingForm.defaultAddress" value="${esc(f.defaultAddress)}" placeholder="Default address (optional)"/>
+  <div style="display:flex;gap:10px;margin-bottom:8px">
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Currency symbol</div><input class="field" data-bind="onboardingForm.currency" value="${esc(f.currency)}" placeholder="$"/></div>
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Timezone</div>${renderTimezoneSelect('onboardingForm.timezone', f.timezone)}</div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:18px">
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours start (0-23)</div><input type="number" inputmode="numeric" min="0" max="23" class="field" data-bind="onboardingForm.hoursStart" value="${esc(f.hoursStart)}"/></div>
+    <div style="flex:1"><div class="hint-text" style="margin-bottom:4px">Hours end (1-24)</div><input type="number" inputmode="numeric" min="1" max="24" class="field" data-bind="onboardingForm.hoursEnd" value="${esc(f.hoursEnd)}"/></div>
+  </div>
+  <div class="btn-primary" data-action="submitOnboarding">Continue</div>
+  ${state.cloudStatus ? `<div class="cloud-status">${esc(state.cloudStatus)}</div>` : ''}`;
+  return renderGateShell(inner);
+}
+
+function renderPaywall(v){
+  const s = state;
+  const status = s.subscription && s.subscription.status;
+  let banner = '';
+  if (status === 'past_due') banner = `<div class="banner-warning" style="margin-top:0">Your last payment didn't go through — update your card to keep your account active.</div>`;
+  else if (status === 'canceled') banner = `<div class="banner-warning" style="margin-top:0">Your subscription was canceled.</div>`;
+  const inner = `<div class="section-title">Subscribe to continue</div>
+  ${banner}
+  <div class="hint-text" style="margin-bottom:16px">Start your subscription to unlock booking management, reminders, and everything else.</div>
+  <div class="btn-primary" style="margin-bottom:10px" data-action="onSubscribe">Subscribe</div>
+  <div class="edit-link" style="text-align:center;display:block" data-action="onManageBilling">Manage billing</div>
+  <div class="signout-link" style="margin-top:18px" data-action="onCloudSignOut">Sign out</div>`;
+  return renderGateShell(inner);
+}
+
+function renderEntitlementGate(v){
+  const s = state;
+  if (!s.cloudReady) return renderGateShell(renderCloudMisconfigured());
+  if (!s.cloudUser) return renderAuthScreen(v);
+  if (s.awaitingOnboarding) return renderOnboarding(v);
+  if (!entitled(s.subscription)) return renderPaywall(v);
+  return null;
+}
+
 function renderApp(){
   const v = computeVals();
+  if (REQUIRE_AUTH) {
+    const gate = renderEntitlementGate(v);
+    if (gate) return gate;
+  }
   return `
     ${renderHeader(v)}
     <main class="app-content">${renderScreen(v)}</main>
@@ -2002,6 +2216,18 @@ root.addEventListener('change', e => {
         state.businessProfile[field] = isNaN(n) ? DEFAULT_BUSINESS_PROFILE[field] : n;
       }
       persistBusinessProfile(state.businessProfile);
+    } else if (el.dataset.bind.indexOf('onboardingForm.') === 0) {
+      // Nothing on the onboarding screen needs to visually react to another
+      // field changing -- skip the render entirely here (same reasoning as
+      // the search-field special-case above) rather than deferring one.
+      // scheduleRender()'s setTimeout(0) defer can land much later than
+      // expected under load (measured 600ms+ in practice), and if that fires
+      // while the NEXT field is mid-fill, this field's whole subtree gets
+      // replaced while an input/change event is in flight on it -- the event
+      // fires on a node that's no longer attached to `root`, so it never
+      // reaches this delegated listener and the keystroke is silently lost.
+      // A form with several fields filled in quick succession (exactly what
+      // onboarding is) is exactly the shape that triggers this.
     } else {
       scheduleRender();
     }

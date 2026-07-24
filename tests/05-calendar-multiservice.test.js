@@ -6,6 +6,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -16,11 +17,12 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
 
   await page.addInitScript(() => {
     localStorage.setItem('asha_appointments_v1', JSON.stringify([
-      { id: 'legacy1', name: 'Legacy Client', phone: '4165550001', service: 'Bridal makeup', date: '2026-08-08', time: '10:00', address: '', price: '', notes: '', status: 'upcoming' },
+      { id: 'legacy1', name: 'Legacy Client', phone: '4165550001', service: 'Consultation', date: '2026-08-08', time: '10:00', address: '', price: '', notes: '', status: 'upcoming' },
     ]));
   });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
 
   await page.click('[data-action="goCalendar"]');
@@ -44,7 +46,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   const dayApptText = await page.locator('.appt-name').first().textContent();
   assert.strictEqual(dayApptText, 'Legacy Client');
   const dayApptService = await page.locator('.appt-service').first().textContent();
-  assert.strictEqual(dayApptService, 'Bridal makeup', 'legacy `service` string should still display correctly');
+  assert.strictEqual(dayApptService, 'Consultation', 'legacy `service` string should still display correctly');
 
   await page.click('.day-slot--free >> nth=0');
   await page.waitForSelector('#field-name');
@@ -53,17 +55,17 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
 
   await page.fill('#field-name', 'Multi Service Client');
   await page.fill('#field-phone', '4165559999');
-  await page.click('.payment-chip[data-value="Bridal makeup"]');
-  await page.click('.payment-chip[data-value="Hairstyling"]');
+  await page.click('.payment-chip[data-value="Consultation"]');
+  await page.click('.payment-chip[data-value="Standard appointment"]');
   const activeChips = await page.locator('.payment-chip--active').allTextContents();
-  assert.deepStrictEqual(activeChips.sort(), ['Bridal makeup', 'Hairstyling'].sort());
+  assert.deepStrictEqual(activeChips.sort(), ['Consultation', 'Standard appointment'].sort());
 
   await page.click('[data-action="onSave"]');
   await page.waitForSelector('.toast');
 
   await page.waitForSelector('.appt-card');
   const homeServiceLabels = await page.locator('.appt-service').allTextContents();
-  assert.ok(homeServiceLabels.some(t => t.includes('Bridal makeup + Hairstyling')), 'joined service label not found on Home');
+  assert.ok(homeServiceLabels.some(t => t.includes('Consultation + Standard appointment')), 'joined service label not found on Home');
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 05-calendar-multiservice');

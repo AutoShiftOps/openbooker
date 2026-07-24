@@ -4,7 +4,7 @@
 // Project settings → your apps → Add app (Web) → copy the config below.
 // `self` (not `window`) so this file works both on the main page and when
 // imported into the service worker for background push notifications.
-self.ASHA_FIREBASE_CONFIG = {
+self.OPENBOOKER_FIREBASE_CONFIG = {
   apiKey: "AIzaSyCmd-la_MduuP4FYz-aQmqLAoWmj2CifPI",
   authDomain: "samakeovers-7326f.firebaseapp.com",
   projectId: "samakeovers-7326f",

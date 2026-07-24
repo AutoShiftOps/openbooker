@@ -1,6 +1,6 @@
 :root {
-  --accent: #3d4a7d;    /* deep indigo/purple, sampled from the SAMakeovers Media logo's outer ring */
-  --accent-soft: #12a457; /* emerald green, sampled from the logo's core */
+  --accent: #2563eb;     /* openbooker brand blue -- static fallback before businessProfile.accent applies at runtime */
+  --accent-soft: #0d9488; /* openbooker brand teal -- static fallback before businessProfile.accentSoft applies at runtime */
 }
 
 * { box-sizing: border-box; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
@@ -80,6 +80,10 @@ html, body { margin: 0; background: #e8e7f2; }
 
 /* Content area */
 .app-content { flex: 1; overflow-y: auto; padding: 18px 18px 90px; }
+
+/* Auth / onboarding / paywall gate (SaaS build only) */
+.gate-screen { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.gate-body { flex: 1; overflow-y: auto; padding: 22px 18px 40px; }
 
 .section-title { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 15px; color: #453f78; margin-bottom: 10px; }
 .hint-text { font-size: 12.5px; color: #7d79a8; margin-bottom: 8px; }

@@ -1,4 +1,4 @@
-const CACHE = 'samakeovers-v3';
+const CACHE = 'openbooker-v1';
 const CORE = ['/', '/index.html', '/styles.css', '/app.js'];
 
 // Background push (automatic appointment reminders). `self` (not `window`) so
@@ -6,8 +6,8 @@ const CORE = ['/', '/index.html', '/styles.css', '/app.js'];
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 importScripts('./firebase-config.js');
-if (self.ASHA_FIREBASE_CONFIG && self.ASHA_FIREBASE_CONFIG.apiKey !== 'PASTE_API_KEY_HERE') {
-  firebase.initializeApp(self.ASHA_FIREBASE_CONFIG);
+if (self.OPENBOOKER_FIREBASE_CONFIG && self.OPENBOOKER_FIREBASE_CONFIG.apiKey !== 'PASTE_API_KEY_HERE') {
+  firebase.initializeApp(self.OPENBOOKER_FIREBASE_CONFIG);
   // Just initializing this here is enough -- the Firebase Messaging SW
   // integration automatically shows a notification for any push carrying a
   // `notification` payload (which is what the reminder Cloud Function sends)

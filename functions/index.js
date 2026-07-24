@@ -9,16 +9,23 @@ const { DateTime } = require('luxon');
 
 admin.initializeApp();
 
-const BUSINESS_TZ = 'America/Toronto'; // Mississauga, Ontario
+// Stripe billing functions live in their own file (stripe.js) -- required
+// after initializeApp() since they call admin.firestore() at request time.
+Object.assign(exports, require('./stripe'));
+
 const REMINDER_MINUTES_BEFORE = 30;
 // Runs every 5 minutes; window is wider than the cron cadence so a slightly
 // delayed run never skips an appointment. `reminderSent` is the real guard
 // against sending the same reminder twice.
 const WINDOW_MINUTES = 10;
+// Neutral fallback for any tenant doc that predates the timezone field --
+// deliberately not a real-world zone like America/Toronto, since that would
+// just be Asha's default leaking into every other tenant's fallback too.
+const FALLBACK_TZ = 'UTC';
 
-function apptStartMillis(appt) {
+function apptStartMillis(appt, tz) {
   if (!appt.date || !appt.time) return null;
-  const dt = DateTime.fromFormat(`${appt.date} ${appt.time}`, 'yyyy-MM-dd HH:mm', { zone: BUSINESS_TZ });
+  const dt = DateTime.fromFormat(`${appt.date} ${appt.time}`, 'yyyy-MM-dd HH:mm', { zone: tz || FALLBACK_TZ });
   return dt.isValid ? dt.toMillis() : null;
 }
 
@@ -37,13 +44,14 @@ exports.sendAppointmentReminders = onSchedule('every 5 minutes', async () => {
     const appointments = Array.isArray(data.appointments) ? data.appointments : [];
     const tokens = Array.isArray(data.fcmTokens) ? data.fcmTokens : [];
     if (!tokens.length) continue;
+    const tz = (data.businessProfile && data.businessProfile.timezone) || FALLBACK_TZ;
 
     let changed = false;
     const staleTokens = new Set();
 
     for (const appt of appointments) {
       if (appt.status !== 'upcoming' || appt.reminderSent) continue;
-      const startMs = apptStartMillis(appt);
+      const startMs = apptStartMillis(appt, tz);
       if (startMs == null || startMs < windowStart || startMs > windowEnd) continue;
 
       const res = await messaging.sendEachForMulticast({

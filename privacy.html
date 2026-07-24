@@ -1,0 +1,59 @@
+<!-- Structural placeholder drafted alongside the sign-up flow -- not reviewed by
+     a lawyer. Real legal review (and likely a companion Data Processing
+     Addendum for tenants who ask) is warranted before charging real money and
+     storing real third-party client data at any real scale. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — openbooker</title>
+<link rel="stylesheet" href="./styles.css">
+<style>
+  body { background: #eef2ff; }
+  .legal-page { max-width: 640px; margin: 0 auto; padding: 36px 22px 60px; color: #2b2b3d; line-height: 1.6; }
+  .legal-page h1 { font-family: 'Poppins', sans-serif; font-size: 22px; color: #453f78; margin-bottom: 4px; }
+  .legal-page .updated { font-size: 12.5px; color: #7d79a8; margin-bottom: 28px; }
+  .legal-page h2 { font-family: 'Poppins', sans-serif; font-size: 15px; color: #453f78; margin-top: 28px; margin-bottom: 8px; }
+  .legal-page p, .legal-page li { font-size: 14px; }
+  .legal-page a { color: var(--accent); }
+  .legal-page .back { display: inline-block; margin-bottom: 18px; font-size: 13px; color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="legal-page">
+  <a class="back" href="./index.html">&larr; Back</a>
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated: 2026</div>
+
+  <p>This policy explains what data openbooker collects and how it's used. openbooker is built for independent service businesses (the "tenant") to manage their own appointments and client relationships.</p>
+
+  <h2>1. Two kinds of data</h2>
+  <p><b>Your account data</b> — your email address, business profile (name, hours, branding), and subscription/billing status — is used to operate your account and is controlled by openbooker as described below.</p>
+  <p><b>Your clients' data</b> — names, phone numbers, addresses, appointment history, and marketing-consent flags you enter about the people you serve — belongs to you, the tenant. openbooker stores and processes this data on your behalf, as a processor, not as its own data. You are responsible for having a lawful basis to collect and retain it.</p>
+
+  <h2>2. What we store</h2>
+  <ul>
+    <li>Account: email, authentication credentials (handled by Firebase Authentication), subscription status.</li>
+    <li>Business profile: name, branding, hours, currency, timezone, and any logo image you upload.</li>
+    <li>Appointments, clients, inventory, and services you enter.</li>
+    <li>Push notification tokens, only if you enable automatic reminders.</li>
+  </ul>
+
+  <h2>3. Where it's stored</h2>
+  <p>Data is stored using Google Firebase (Firestore, Authentication, Cloud Messaging) and served via Firebase Hosting. Subscription billing is handled by Stripe; openbooker does not store your payment card details directly.</p>
+
+  <h2>4. Data isolation</h2>
+  <p>Each tenant's data is isolated to their own account and is not visible to other tenants. Server-side rules enforce this at the database level.</p>
+
+  <h2>5. Data retention &amp; deletion</h2>
+  <p>Your data is retained for as long as your account is active. You can request deletion of your account and associated data by contacting support.</p>
+
+  <h2>6. Third parties</h2>
+  <p>We use Google Firebase (infrastructure) and Stripe (billing) as sub-processors. We don't sell your data or your clients' data to third parties.</p>
+
+  <h2>7. Contact</h2>
+  <p>Questions about this policy, or requests to access or delete data, can be sent to the support contact listed in the app.</p>
+</div>
+</body>
+</html>

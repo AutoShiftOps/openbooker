@@ -2,6 +2,7 @@
 // reminders section exists in its place, and Services management is present.
 const { chromium } = require('playwright');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -11,6 +12,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.click('[data-action="goSettings"]');
   await page.waitForSelector('.section-title');
   const sectionTitles = await page.locator('.section-title').allTextContents();

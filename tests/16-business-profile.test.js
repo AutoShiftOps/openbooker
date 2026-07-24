@@ -7,6 +7,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -16,11 +17,13 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
 
-  // Defaults render correctly before any edits.
+  // Defaults render correctly before any edits (seeded by bypassGate --
+  // stands in for a completed onboarding wizard).
   const wordmarkBefore = await page.locator('.wordmark').textContent();
-  assert.strictEqual(wordmarkBefore, 'SAMakeovers');
+  assert.strictEqual(wordmarkBefore, 'Test Business');
 
   await page.click('[data-action="goSettings"]');
   await page.waitForSelector('.section-title');
@@ -28,7 +31,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   assert.ok(titles.some(t => /business details/i.test(t)), 'expected a "Business details" settings section');
 
   const nameInput = page.locator('[data-bind="businessProfile.name"]');
-  assert.strictEqual(await nameInput.inputValue(), 'SAMakeovers');
+  assert.strictEqual(await nameInput.inputValue(), 'Test Business');
 
   // 1. Editing the name persists and updates the header live.
   await nameInput.fill('Glow Studio');
@@ -90,6 +93,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
 
   // 6. Survives a full reload (localStorage, not just in-memory state).
   await page.reload({ waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
   assert.strictEqual(await page.locator('.wordmark').textContent(), 'Glow Studio', 'edited name should survive a reload');
   const accentVarAfterReload = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());

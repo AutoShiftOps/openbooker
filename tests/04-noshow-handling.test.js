@@ -6,6 +6,7 @@
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
+const { bypassGate } = require('./lib/bypassGate');
 
 (async () => {
   const browser = await chromium.launch();
@@ -16,8 +17,14 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
 
   await page.addInitScript(() => {
     const past = new Date(Date.now() - 3 * 60 * 60000); // 3 hours ago
-    const dateStr = past.toISOString().slice(0, 10);
-    const timeStr = past.toTimeString().slice(0, 5);
+    // Build both from the same local calendar fields -- mixing toISOString()
+    // (UTC date) with toTimeString() (local time) silently breaks whenever the
+    // UTC and local dates differ (i.e. for part of every day, depending on
+    // timezone), which can push this "3 hours ago" appointment into what the
+    // app reads as tomorrow instead of earlier today.
+    const pad2 = n => String(n).padStart(2, '0');
+    const dateStr = `${past.getFullYear()}-${pad2(past.getMonth() + 1)}-${pad2(past.getDate())}`;
+    const timeStr = `${pad2(past.getHours())}:${pad2(past.getMinutes())}`;
     localStorage.setItem('asha_appointments_v1', JSON.stringify([
       { id: 'overdue1', name: 'Zakia', phone: '4165550101', service: 'Facial & skincare', date: dateStr, time: timeStr, address: '', price: '', notes: '', status: 'upcoming' },
       { id: 'future1', name: 'Minnie', phone: '4165550102', service: 'Saree draping', date: '2026-08-08', time: '16:30', address: '', price: '', notes: '', status: 'upcoming' },
@@ -25,6 +32,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
   });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
+  await bypassGate(page);
   await page.waitForSelector('.wordmark');
 
   const bannerCount = await page.locator('text=/needs an outcome/').count();

@@ -1,7 +1,7 @@
 {
-  "name": "samakeovers-tests",
+  "name": "openbooker-tests",
   "private": true,
-  "description": "Playwright regression suite for the SAMakeovers appointment app (see README.md)",
+  "description": "Playwright regression suite for the openbooker appointment app (see README.md)",
   "scripts": {
     "test": "node run-all.js"
   },
