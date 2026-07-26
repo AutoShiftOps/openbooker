@@ -53,10 +53,15 @@ const { bypassGate } = require('./lib/bypassGate');
   console.log('backup file includes appointments + inventory + services + clients: OK');
 
   // --- 2. Delete confirmation (appointment) ---
+  // Search results are grouped by client now (see
+  // 26-search-grouped-and-name-collisions.test.js) -- tap the client row,
+  // then the specific appointment within their history, to reach the detail screen.
   await page.click('[data-action="goSearch"]');
   await page.fill('#search-input', 'priya');
   await page.waitForSelector('.appt-card');
   await page.click('.appt-card');
+  await page.waitForSelector('[data-action="openAppt"]');
+  await page.click('[data-action="openAppt"]');
   await page.waitForSelector('[data-action="deleteAppt"]');
 
   // Dismiss the confirm dialog -> appointment should survive.

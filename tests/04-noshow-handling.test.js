@@ -60,11 +60,13 @@ const { bypassGate } = require('./lib/bypassGate');
   const noShowSectionCount = await page.locator('text=No-shows').count();
   assert.ok(noShowSectionCount > 0, 'No-shows section missing from History');
 
+  // Search is grouped by client (see 26-search-grouped-and-name-collisions.test.js),
+  // so this shows Zakia's aggregate no-show count, not a single appointment's status label.
   await page.click('[data-action="goSearch"]');
   await page.fill('#search-input', 'zakia');
   await page.waitForSelector('.appt-card');
-  const statusText = await page.locator('.status-label').textContent();
-  assert.strictEqual(statusText.trim(), 'No-show', 'search does not show No-show status');
+  const rowText = await page.locator('.appt-card').first().textContent();
+  assert.ok(/1 no-show/.test(rowText), 'search result should show the no-show on Zakia\'s aggregate row: ' + rowText);
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 04-noshow-handling');

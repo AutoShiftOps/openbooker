@@ -26,8 +26,11 @@ const { bypassGate } = require('./lib/bypassGate');
 
   await page.click('[data-action="goAdd"]');
   await page.waitForSelector('.payment-chip[data-action="pickRecentClient"]');
+  // Chips now include the phone number alongside the name (disambiguates
+  // clients who share a name -- see 26-search-grouped-and-name-collisions.test.js),
+  // so check by substring rather than an exact array match.
   const chipLabels = await page.locator('.payment-chip[data-action="pickRecentClient"]').allTextContents();
-  assert.ok(chipLabels.includes('Priya Sharma') && chipLabels.includes('Jane Doe'));
+  assert.ok(chipLabels.some(t => t.includes('Priya Sharma')) && chipLabels.some(t => t.includes('Jane Doe')));
 
   await page.click('.payment-chip[data-action="pickRecentClient"]:has-text("Priya Sharma")');
   await page.waitForTimeout(50);
@@ -37,10 +40,15 @@ const { bypassGate } = require('./lib/bypassGate');
   const activeChips = await page.locator('.payment-chip--active').allTextContents();
   assert.ok(activeChips.includes('Consultation') && activeChips.includes('Standard appointment'));
 
+  // Search results are grouped by client now (see
+  // 26-search-grouped-and-name-collisions.test.js) -- tap the client row,
+  // then the specific appointment within their history, to reach "Book again".
   await page.click('[data-action="goSearch"]');
   await page.fill('#search-input', 'priya');
   await page.waitForSelector('.appt-card');
   await page.click('.appt-card');
+  await page.waitForSelector('[data-action="openAppt"]');
+  await page.click('[data-action="openAppt"]');
   await page.waitForSelector('[data-action="bookAgain"]');
   await page.click('[data-action="bookAgain"]');
   await page.waitForSelector('#field-name');

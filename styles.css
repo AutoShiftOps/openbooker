@@ -79,7 +79,7 @@ html, body { margin: 0; background: #e8e7f2; }
 }
 
 /* Content area */
-.app-content { flex: 1; overflow-y: auto; padding: 18px 18px 90px; }
+.app-content { flex: 1; overflow-y: auto; padding: 18px 18px 90px; -webkit-overflow-scrolling: touch; }
 
 /* Auth / onboarding / paywall gate (SaaS build only) */
 .gate-screen { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -173,6 +173,13 @@ html, body { margin: 0; background: #e8e7f2; }
 .calendar-cell {
   aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 10px; cursor: pointer; position: relative;
+  /* Without this, a touch-capable device (e.g. a Windows touchscreen laptop)
+     has to wait to see if a tap turns into a scroll gesture before committing
+     to a click -- in a dense grid of small adjacent cells inside a scrollable
+     container, that shows up as "the first tap does nothing, the second one
+     selects it" and a scroll that feels laggy/uncertain. This tells the
+     browser taps here are never scroll gestures, so it can commit immediately. */
+  touch-action: manipulation;
 }
 .calendar-daynum { font-size: 13px; font-weight: 600; color: #2c2a52; }
 .calendar-cell--out .calendar-daynum { color: #d9d6ea; }

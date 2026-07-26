@@ -41,6 +41,7 @@ const VAPID_KEY = 'BEm07yLb3A4FD8a2RggNcZIA-SbuG8fZzDccgtxghLUXVfH6iBsioQPtui32G
 
 const DEFAULT_SERVICES = ['Consultation','Standard appointment','Other'];
 const PAYMENT_METHODS = ['Cash','Interac','Card','Other'];
+const PAGE_SIZE = 15; // rows shown before a "Show more" button, on any list that can grow unbounded
 
 // Curated, not exhaustive -- a starting set covering North America plus a few
 // common others. Expand as real tenants ask for a zone that's missing; the
@@ -90,6 +91,29 @@ function applyFavicon(dataUrl){
 // ---- Pure business logic (dates, formatting, parsing, analytics) ----
 function pad(n){ return n<10?'0'+n:''+n; }
 
+// Date.now() alone collides when several records are created in the same
+// millisecond -- a real bug found via reconcileClientsFromAppointments(),
+// which creates client records in a tight synchronous loop (two clients
+// reconciled from the same batch of appointments could end up with an
+// identical id, so looking one up by id could silently return the wrong
+// client). The random suffix guarantees uniqueness even for same-millisecond calls.
+function uid(prefix){
+  return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// New bookings default to right now (rounded up to the next 15-minute mark so
+// it's a plausible slot, not an odd time like 2:37pm) -- saves a walk-in/
+// same-day booking from always needing the date/time manually set, while
+// staying fully editable for anything scheduled later.
+function defaultBookingDateTime(){
+  const now = new Date();
+  const date = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  let hours = now.getHours();
+  let minutes = Math.ceil(now.getMinutes() / 15) * 15;
+  if (minutes === 60) { hours = (hours + 1) % 24; minutes = 0; }
+  return { date, time: `${pad(hours)}:${pad(minutes)}` };
+}
+
 function toDateObj(dateStr,timeStr){
   if(!dateStr) return null;
   const [y,m,d]=dateStr.split('-').map(Number);
@@ -138,7 +162,8 @@ function fmtCountdown(dateStr,timeStr){
   return `in ${days} day${days===1?'':'s'}`;
 }
 function emptyForm(){
-  return { name:'', phone:'', services:[], date:'', time:'', address:state.businessProfile.defaultAddress, price:'', notes:'' };
+  const { date, time } = defaultBookingDateTime();
+  return { name:'', phone:'', services:[], date, time, address:state.businessProfile.defaultAddress, price:'', notes:'' };
 }
 function emptyEditForm(){
   return { name:'', phone:'', services:[], date:'', time:'', address:'', price:'', paymentMethod:'', notes:'' };
@@ -392,6 +417,15 @@ function isValidPrice(v){
   return /^\d+(\.\d{1,2})?$/.test(String(v).trim());
 }
 
+// Two different clients can easily share a first name (or full name) --
+// showing the phone alongside it everywhere a name is used to pick/identify
+// someone (not just where full contact details are already listed) means
+// there's never an ambiguous "which Priya is this?" moment.
+function clientLabel(name, phone){
+  if (name && phone) return `${name} (${phone})`;
+  return name || phone || '';
+}
+
 // Canonical client directory, separate from the appointments list, so a
 // client's contact info and marketing-consent flag survive independently of
 // any one booking (and aren't lost/duplicated across repeat visits). Matched
@@ -406,7 +440,7 @@ function upsertClient(list, { name, phone, address }){
   const idx = list.findIndex(c => keyOf(c) === key);
   const now = Date.now();
   if (idx === -1) {
-    return [...list, { id: 'c_' + now, name: name || '', phone: phone || '', address: address || '', consent: false, updatedAt: now }];
+    return [...list, { id: uid('c'), name: name || '', phone: phone || '', address: address || '', consent: false, updatedAt: now }];
   }
   const copy = list.slice();
   copy[idx] = { ...copy[idx], name: name || copy[idx].name, phone: phone || copy[idx].phone, address: address || copy[idx].address, updatedAt: now };
@@ -493,8 +527,14 @@ const state = {
   newClientForm: { name: '', phone: '', address: '' },
   mergingClientId: null,
   mergeTargetId: null,
+  viewingClientId: null,
   blockedDates: [],
-  businessProfile: { ...DEFAULT_BUSINESS_PROFILE }
+  businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
+  // How many rows of each growing list to show before a "Show more" button --
+  // otherwise these all grow unbounded as the business accumulates history.
+  homeUpcomingVisible: PAGE_SIZE,
+  earningsCompletedVisible: PAGE_SIZE,
+  clientsVisible: PAGE_SIZE
 };
 
 let auth = null, db = null, fns = null, toastTimer = null;
@@ -784,7 +824,7 @@ function saveAppointment(){
   if (!isValidPrice(f.price)) { showToast('Price should be a plain number, e.g. 250'); return; }
   if (state.logPast && (!f.price || !state.pendingPaymentMethod)) { showToast('Add the price & payment method to log this visit'); return; }
   const wasLogPast = state.logPast;
-  const id = 'a_' + Date.now();
+  const id = uid('a');
   const record = wasLogPast
     ? { id, status: 'done', paymentMethod: state.pendingPaymentMethod, ...f, updatedAt: Date.now() }
     : { id, status: 'upcoming', ...f, updatedAt: Date.now() };
@@ -830,7 +870,7 @@ function mergeClientsAction(keepId, absorbId){
 function addInventoryItem(){
   const { invName, invQty, invThreshold, invUnit } = state;
   if (!invName) { showToast('Enter an item name'); return; }
-  const item = { id: 'i_' + Date.now(), name: invName, qty: +invQty || 0, threshold: +invThreshold || 0, unit: invUnit || '', updatedAt: Date.now() };
+  const item = { id: uid('i'), name: invName, qty: +invQty || 0, threshold: +invThreshold || 0, unit: invUnit || '', updatedAt: Date.now() };
   persistInventory([...state.inventory, item]);
   setState({ invName: '', invQty: '', invThreshold: '', invUnit: '' });
   showToast('Item added');
@@ -933,7 +973,7 @@ const Actions = {
   goHome: () => setState({ screen: 'home' }),
   goBack: () => setState({ screen: 'home', detailId: null }),
   goAdd: () => setState({ screen: 'add' }),
-  goSearch: () => setState({ screen: 'search' }),
+  goSearch: () => setState({ screen: 'search', viewingClientId: null }),
   goEarnings: () => setState({ screen: 'earnings' }),
   goInventory: () => setState({ screen: 'inventory' }),
   goSettings: () => setState({ screen: 'settings' }),
@@ -960,7 +1000,7 @@ const Actions = {
       persistBlockedDates(state.blockedDates.filter(b => b.id !== existing.id));
       showToast('Day marked available again');
     } else {
-      persistBlockedDates([...state.blockedDates, { id: 'bd_' + Date.now(), date, updatedAt: Date.now() }]);
+      persistBlockedDates([...state.blockedDates, { id: uid('bd'), date, updatedAt: Date.now() }]);
       showToast('Day marked off');
     }
   },
@@ -988,30 +1028,40 @@ const Actions = {
     if (!client) return;
     setState(s => ({ form: { ...s.form, name: client.name, phone: client.phone, address: client.address, services: [...client.services] } }));
   },
+  // Autocomplete match while typing a name on the Add screen -- fills in
+  // their known phone/address from the client directory (not services,
+  // which are per-visit, not per-client).
+  pickNameMatch: (id) => {
+    const client = state.clients.find(c => c.id === id);
+    if (!client) return;
+    setState(s => ({ form: { ...s.form, name: client.name, phone: client.phone, address: client.address || s.form.address } }));
+  },
+  showMoreUpcoming: () => setState(s => ({ homeUpcomingVisible: s.homeUpcomingVisible + PAGE_SIZE })),
+  showMoreCompleted: () => setState(s => ({ earningsCompletedVisible: s.earningsCompletedVisible + PAGE_SIZE })),
+  showMoreClients: () => setState(s => ({ clientsVisible: s.clientsVisible + PAGE_SIZE })),
   bookAgain: () => {
     const a = state.appointments.find(x => x.id === state.detailId);
     if (!a) return;
     setState({
       screen: 'add', addTab: 'manual', detailId: null,
-      form: { ...emptyForm(), name: a.name || '', phone: a.phone || '', address: a.address || '', services: serviceList(a) }
+      // date/time deliberately blank here, unlike a fresh emptyForm() -- a
+      // repeat booking is a new future slot to pick, not "right now".
+      form: { ...emptyForm(), date: '', time: '', name: a.name || '', phone: a.phone || '', address: a.address || '', services: serviceList(a) }
     });
   },
   pickSlotTime: (id, value) => setState(s => ({ form: { ...s.form, time: value } })),
   toggleClientConsent: (id) => {
     persistClients(state.clients.map(c => c.id === id ? { ...c, consent: !c.consent, updatedAt: Date.now() } : c));
   },
-  viewClientHistory: (id) => {
-    const client = state.clients.find(c => c.id === id);
-    if (!client) return;
-    setState({ search: client.phone || client.name || '' });
-  },
+  viewClientHistory: (id) => setState({ viewingClientId: id }),
+  backFromClientHistory: () => setState({ viewingClientId: null }),
 
   openAddClient: () => setState({ addingClient: true, newClientForm: { name: '', phone: '', address: '' } }),
   cancelAddClient: () => setState({ addingClient: false }),
   confirmAddClient: () => {
     const f = state.newClientForm;
     if (!f.name && !f.phone) { showToast('Enter a name or phone number'); return; }
-    persistClients([...state.clients, { id: 'c_' + Date.now(), name: f.name, phone: f.phone, address: f.address, consent: false, updatedAt: Date.now() }]);
+    persistClients([...state.clients, { id: uid('c'), name: f.name, phone: f.phone, address: f.address, consent: false, updatedAt: Date.now() }]);
     setState({ addingClient: false });
     showToast('Client added');
   },
@@ -1150,7 +1200,7 @@ const Actions = {
   onAddService: () => {
     const name = (state.newServiceName || '').trim();
     if (!name) { showToast('Enter a service name'); return; }
-    persistServices([...state.services, { id: 'sv_' + Date.now(), name, updatedAt: Date.now() }]);
+    persistServices([...state.services, { id: uid('sv'), name, updatedAt: Date.now() }]);
     setState({ newServiceName: '' });
     showToast('Service added');
   },
@@ -1255,20 +1305,15 @@ function computeVals(){
   } : null;
 
   const searchQ = (s.search || '').toLowerCase();
-  // Phone numbers get typed with all kinds of punctuation (dashes, spaces,
-  // parens) depending on where they were entered from -- compare digits-only
-  // on both sides so formatting differences don't hide a real match. Only
-  // applied when the query actually has digits, so a pure-name search doesn't
-  // spuriously match every phone number via an empty-string .includes().
-  const searchDigits = searchQ.replace(/\D/g, '');
-  const searchResults = searchQ ? withMeta(s.appointments.filter(a =>
-    (a.name || '').toLowerCase().includes(searchQ) ||
-    (searchDigits && (a.phone || '').replace(/\D/g, '').includes(searchDigits))
-  ).sort((a,b) => toDateObj(b.date||'1970-01-01', b.time||'00:00') - toDateObj(a.date||'1970-01-01', a.time||'00:00'))) : [];
 
   const completed = s.appointments.filter(a => a.status === 'done');
   const weekAgo = new Date(now.getTime() - 7*86400000);
   const weekTotal = completed.filter(a => a.date && toDateObj(a.date,'00:00') >= weekAgo).reduce((sum,a) => sum + (+a.price || 0), 0);
+  // "Completed jobs" below counts every completed job ever, same as the full
+  // history list beneath it -- this all-time total keeps the $ figure
+  // matching the same scope, instead of only weekTotal (last 7 days) sitting
+  // next to a count of everything.
+  const allTimeTotal = completed.reduce((sum,a) => sum + (+a.price || 0), 0);
   const completedList = withMeta(completed.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
 
   const noShows = s.appointments.filter(a => a.status === 'no-show');
@@ -1336,6 +1381,42 @@ function computeVals(){
     };
   }).sort((a,b) => (a.name||'').localeCompare(b.name||''));
 
+  // Drilling into one client's full appointment history (tapped from a search
+  // result or the "All clients" list) -- a dedicated view, not the search box
+  // reused as a filter, since search now shows one grouped row per client
+  // rather than one row per appointment.
+  const viewingClient = s.viewingClientId ? allClients.find(c => c.id === s.viewingClientId) : null;
+  const viewingClientAppointments = viewingClient
+    ? withMeta(s.appointments.filter(a => apptKeyOf(a) === clientKeyOf(viewingClient))
+        .sort((a,b) => toDateObj(b.date||'1970-01-01', b.time||'00:00') - toDateObj(a.date||'1970-01-01', a.time||'00:00')))
+    : [];
+
+  // Live suggestions while typing a client's name on the Add screen, so a
+  // returning client's phone/address doesn't need to be re-typed from memory.
+  // Only while phone is still blank -- once it's filled (by picking a match,
+  // or by typing one manually for a genuinely new client), suggestions stop
+  // showing rather than lingering under an already-answered field. Requires
+  // at least 2 characters so it doesn't flash a huge list after one keystroke.
+  const formNameQ = (s.form.name || '').trim().toLowerCase();
+  const nameMatches = (!s.form.phone && formNameQ.length >= 2)
+    ? s.clients.filter(c => (c.name || '').toLowerCase().includes(formNameQ)).slice(0, 5)
+    : [];
+
+  // Group search results by client (not one row per appointment) -- same
+  // shape and tap-through as the "All clients" list above, just filtered by
+  // query, so a client with several bookings shows up once instead of once
+  // per appointment. Phone numbers get typed with all kinds of punctuation
+  // (dashes, spaces, parens) depending on where they were entered from --
+  // compare digits-only on both sides so formatting differences don't hide a
+  // real match. Only applied when the query actually has digits, so a
+  // pure-name search doesn't spuriously match every phone number via an
+  // empty-string .includes().
+  const searchDigits = searchQ.replace(/\D/g, '');
+  const searchResults = searchQ ? allClients.filter(c =>
+    (c.name || '').toLowerCase().includes(searchQ) ||
+    (searchDigits && (c.phone || '').replace(/\D/g, '').includes(searchDigits))
+  ) : [];
+
   return {
     accent, currency,
     headerSubtitle: s.screen === 'home' ? `${upcoming.length} upcoming booking${upcoming.length===1?'':'s'}` :
@@ -1352,7 +1433,7 @@ function computeVals(){
     todayList, upcomingList,
     inventoryList, hasInventory: inventoryList.length > 0, lowStockCount: lowStockItems.length, hasLowStock: lowStockItems.length > 0,
     searchResults, searchEmptyLabel: searchQ ? 'No matching clients found.' : 'Type a name or phone number to search.',
-    weekTotal, completedCount: completed.length, completedList,
+    weekTotal, allTimeTotal, completedCount: completed.length, completedList,
     noShowList, hasNoShows: noShowList.length > 0,
     noShowsByClient, hasNoShowsByClient: noShowsByClient.length > 0,
     topClients, hasTopClients: topClients.length > 0,
@@ -1367,6 +1448,8 @@ function computeVals(){
     formOverlapWarning, daySchedule, formDateBlocked,
     calendarGrid, calendarDayAppts, calendarDaySchedule, calendarSelectedBlocked,
     recentClients, hasRecentClients: recentClients.length > 0,
+    nameMatches, hasNameMatches: nameMatches.length > 0,
+    viewingClient, viewingClientAppointments,
     allClients, hasClients: allClients.length > 0
   };
 }
@@ -1400,6 +1483,15 @@ function renderNav(){
     <div class="${cls('earnings')}" data-action="goEarnings">${ICON_CHART}<div class="nav-label">History</div></div>
     <div class="${cls('inventory')}" data-action="goInventory">${ICON_BOX}<div class="nav-label">Inventory</div></div>
   </nav>`;
+}
+
+// Shared "Show more" footer for any list capped at a visible count -- avoids
+// the same growing-list-with-no-end problem showing up separately on Home,
+// Earnings history, and the client directory.
+function renderShowMore(totalCount, visibleCount, action){
+  if (totalCount <= visibleCount) return '';
+  const remaining = totalCount - visibleCount;
+  return `<div class="action-btn-secondary" style="margin-bottom:14px" data-action="${action}">Show ${Math.min(remaining, PAGE_SIZE)} more (${remaining} left)</div>`;
 }
 
 function renderHome(v){
@@ -1450,7 +1542,8 @@ function renderHome(v){
   }
   html += `<div class="section-title">Upcoming</div>`;
   if (v.upcomingList.length) {
-    html += `<div class="appt-list">${v.upcomingList.map(a => `
+    const visibleUpcoming = v.upcomingList.slice(0, state.homeUpcomingVisible);
+    html += `<div class="appt-list">${visibleUpcoming.map(a => `
       <div class="appt-card appt-card--upcoming" data-action="openAppt" data-id="${esc(a.id)}">
         <div>
           <div class="appt-name">${esc(a.name)}</div>
@@ -1458,6 +1551,7 @@ function renderHome(v){
         </div>
         <div class="appt-time">${esc(a.timeLabel)}</div>
       </div>`).join('')}</div>`;
+    html += renderShowMore(v.upcomingList.length, state.homeUpcomingVisible, 'showMoreUpcoming');
   } else {
     html += `<div class="empty-state empty-state--dashed">No appointments yet.<br/>Tap the <b>+</b> button below to add your first booking.</div>`;
   }
@@ -1488,11 +1582,17 @@ function renderAdd(v){
   if (s.addTab === 'manual' && v.hasRecentClients) {
     html += `<div class="payment-panel-title" style="margin-top:2px">Recent clients — tap to fill in</div>
     <div class="payment-chip-row" style="margin-bottom:10px">
-      ${v.recentClients.map((c,i) => `<div class="payment-chip" data-action="pickRecentClient" data-id="${i}">${esc(c.name || c.phone)}</div>`).join('')}
+      ${v.recentClients.map((c,i) => `<div class="payment-chip" data-action="pickRecentClient" data-id="${i}">${esc(clientLabel(c.name, c.phone))}</div>`).join('')}
     </div>`;
   }
   html += `<div class="field-stack">
     <input id="field-name" class="field" data-bind="form.name" value="${esc(f.name)}" placeholder="Client name"/>
+    ${v.hasNameMatches ? `<div class="list-col" style="margin-bottom:0;gap:6px">
+      ${v.nameMatches.map(c => `<div class="list-row" style="cursor:pointer" data-action="pickNameMatch" data-id="${esc(c.id)}">
+        <div class="list-row-label">${esc(c.name || c.phone)}</div>
+        <div class="list-row-sub">${esc(c.phone)}</div>
+      </div>`).join('')}
+    </div>` : ''}
     <input id="field-phone" class="field" type="tel" inputmode="tel" autocomplete="tel" data-bind="form.phone" value="${esc(f.phone)}" placeholder="Phone number"/>
     <div class="payment-panel-title" style="margin-top:2px">Services (tap all that apply)</div>
     <div class="payment-chip-row" style="margin-bottom:4px">
@@ -1536,19 +1636,47 @@ function renderAdd(v){
   return html;
 }
 
+// Shared between search results and the "All clients" browse list below --
+// one row per client (name, phone, visit stats), tap to open their full
+// booking history. Kept separate from the browse list's row markup only in
+// that merge/consent controls don't make sense mid-search.
+function renderClientSearchRow(c){
+  return `<div class="appt-card appt-card--upcoming" data-action="viewClientHistory" data-id="${esc(c.id)}">
+    <div>
+      <div class="appt-name">${esc(c.name || c.phone)}</div>
+      <div class="appt-service">${esc(c.phone)}</div>
+      <div class="appt-service">${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; ${esc(c.totalSpendLabel)}${c.noShowCount ? ` &middot; ${c.noShowCount} no-show${c.noShowCount===1?'':'s'}` : ''} &middot; last: ${esc(c.lastVisitLabel)}</div>
+    </div>
+  </div>`;
+}
+
 function renderSearch(v){
   const s = state;
+  if (s.viewingClientId && v.viewingClient) {
+    const c = v.viewingClient;
+    let html = `<div>
+      <div class="back-link" data-action="backFromClientHistory">&larr; Back</div>
+      <div class="section-title">${esc(c.name || c.phone)}</div>
+      <div class="hint-text">${esc(c.phone)} &middot; ${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; ${esc(c.totalSpendLabel)}${c.noShowCount ? ` &middot; ${c.noShowCount} no-show${c.noShowCount===1?'':'s'}` : ''}</div>`;
+    if (v.viewingClientAppointments.length) {
+      html += `<div class="appt-list">${v.viewingClientAppointments.map(a => `
+        <div class="appt-card appt-card--upcoming" data-action="openAppt" data-id="${esc(a.id)}">
+          <div>
+            <div class="appt-name">${esc(a.service)}</div>
+            <div class="appt-service">${esc(a.dateLabel)} ${esc(a.timeLabel)}</div>
+          </div>
+          <div class="status-label" style="color:${a.statusColor}">${esc(a.statusLabel)}</div>
+        </div>`).join('')}</div>`;
+    } else {
+      html += `<div class="empty-state">No appointments yet.</div>`;
+    }
+    html += '</div>';
+    return html;
+  }
   let html = `<div>
     <input id="search-input" class="field search-field" data-bind="search" value="${esc(s.search)}" placeholder="Search client name or phone"/>`;
   if (v.searchResults.length) {
-    html += `<div class="appt-list">${v.searchResults.map(a => `
-      <div class="appt-card appt-card--upcoming" data-action="openAppt" data-id="${esc(a.id)}">
-        <div style="display:flex;justify-content:space-between">
-          <div class="appt-name">${esc(a.name)}</div>
-          <div class="status-label" style="color:${a.statusColor}">${esc(a.statusLabel)}</div>
-        </div>
-        <div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)} ${esc(a.timeLabel)}</div>
-      </div>`).join('')}</div>`;
+    html += `<div class="appt-list">${v.searchResults.map(c => renderClientSearchRow(c)).join('')}</div>`;
   } else if (!s.search) {
     if (s.mergingClientId) {
       const mergingClient = s.clients.find(c => c.id === s.mergingClientId);
@@ -1578,8 +1706,9 @@ function renderSearch(v){
     }
 
     if (v.hasClients) {
+      const visibleClients = v.allClients.slice(0, state.clientsVisible);
       html += `<div class="appt-list">
-        ${v.allClients.map(c => {
+        ${visibleClients.map(c => {
           const isSource = s.mergingClientId === c.id;
           const rowAction = s.mergingClientId
             ? (isSource ? '' : `data-action="selectMergeTarget" data-id="${esc(c.id)}"`)
@@ -1601,6 +1730,7 @@ function renderSearch(v){
           </div>`;
         }).join('')}
       </div>`;
+      html += renderShowMore(v.allClients.length, state.clientsVisible, 'showMoreClients');
     } else {
       html += `<div class="empty-state">No clients yet — add one above, or they'll appear automatically after your first booking.</div>`;
     }
@@ -1630,15 +1760,18 @@ function renderEarnings(v){
   let html = `<div>
     <div class="stat-row">
       <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value">${esc(v.currency)}${v.weekTotal}</div></div>
+      <div class="stat-card"><div class="stat-label">All-time revenue</div><div class="stat-value">${esc(v.currency)}${v.allTimeTotal}</div></div>
       <div class="stat-card"><div class="stat-label">Completed jobs</div><div class="stat-value">${v.completedCount}</div></div>
     </div>`;
   html += `<div class="section-title">Completed history</div>`;
   if (v.completedList.length) {
-    html += `<div class="appt-list">${v.completedList.map(a => `
+    const visibleCompleted = v.completedList.slice(0, state.earningsCompletedVisible);
+    html += `<div class="appt-list">${visibleCompleted.map(a => `
       <div class="appt-card appt-card--completed" data-action="openAppt" data-id="${esc(a.id)}" style="cursor:pointer">
         <div><div class="appt-name">${esc(a.name)}</div><div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)}</div></div>
         <div class="appt-price">${esc(a.priceLabel)}</div>
       </div>`).join('')}</div>`;
+    html += renderShowMore(v.completedList.length, state.earningsCompletedVisible, 'showMoreCompleted');
   } else {
     html += `<div class="empty-state">Nothing completed yet — mark bookings done from their detail screen.</div>`;
   }
@@ -2182,7 +2315,7 @@ root.addEventListener('input', e => {
     // on every keystroke was resetting mobile virtual keyboards back to the
     // default letter layout for tel/email/number fields, forcing a manual tap
     // back to the digit pad after every character.
-    if (el.dataset.bind === 'search') scheduleRender();
+    if (el.dataset.bind === 'search' || el.dataset.bind === 'form.name') scheduleRender();
     // Color pickers fire 'input' continuously while dragging -- apply live so
     // she sees the accent change in real time, without a full re-render.
     if (el.dataset.bind === 'businessProfile.accent' || el.dataset.bind === 'businessProfile.accentSoft') {

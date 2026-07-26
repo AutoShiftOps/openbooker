@@ -54,6 +54,12 @@ BASE_URL=http://localhost:5000 node 07-search-phone-normalization.test.js
 | `20-subscription-paywall.test.js` | Subscription paywall gate: blocks the app without an entitled subscription, `trialing` counts as entitled (not just `active`), `past_due`/`canceled` show the right banner, becoming entitled unlocks the app live without a reload |
 | `21-timezone-setting.test.js` | Per-tenant timezone `<select>` in Business details persists across reload (the Cloud Function side -- reading it per-tenant instead of a hardcoded zone -- isn't reachable from this harness) |
 | `22-existing-data-migration-safety.test.js` | Regression: an existing installer with real local data (not a blank slate) who signs in for the first time under mandatory auth must NOT be routed into the onboarding wizard -- their existing business profile/appointments sync up as-is instead |
+| `23-earnings-alltime-stat.test.js` | Earnings stat row shows a distinct "This week" and "All-time revenue" figure, matching the scope of the completed-history list beneath them |
+| `24-auto-date-time-default.test.js` | A fresh booking defaults date/time to right now (rounded to the next 15 minutes); "Book again" still deliberately leaves date/time blank |
+| `25-name-autocomplete.test.js` | Typing a client's name on the Add screen suggests matching existing clients (name + phone) once phone is still blank; tapping one autofills phone/address; suggestions require 2+ characters and disappear once phone is filled |
+| `26-search-grouped-and-name-collisions.test.js` | Search groups results by client (not one row per appointment) with visit count and phone shown; recent-clients quick-pick chips always show phone to disambiguate clients who share a name |
+| `27-pagination.test.js` | Home's upcoming list, Earnings' completed history, and the client directory all cap at 15 rows with a working "Show more" button instead of rendering unbounded |
+| `28-client-id-uniqueness.test.js` | Regression: client/appointment/inventory/service ids generated from `Date.now()` alone could collide when several were created in the same millisecond (exactly what the client-reconciliation loop does) -- an id-based lookup could silently resolve to the wrong record |
 
 ## Adding a new test
 
