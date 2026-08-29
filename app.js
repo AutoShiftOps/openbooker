@@ -1264,8 +1264,21 @@ function computeVals(){
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 
-  const isOverdue = a => a.status === 'upcoming' && a.date && a.time &&
-    (now - toDateObj(a.date, a.time)) > state.businessProfile.appointmentDurationMin * 60000;
+  // "Overdue" = a still-open booking whose slot has passed, so Asha needs to
+  // record what happened (done / no-show). Two cases: (1) any date before
+  // today is overdue regardless of whether a time was ever entered -- date
+  // strings are zero-padded YYYY-MM-DD so a plain string compare is
+  // chronological; (2) a booking dated today is only overdue once its time
+  // plus the assumed appointment length has elapsed, so a 2pm slot doesn't
+  // nag at 2:05.
+  const isOverdue = a => {
+    if (a.status !== 'upcoming' || !a.date) return false;
+    if (a.date < todayStr) return true;
+    if (a.date === todayStr && a.time) {
+      return (now - toDateObj(a.date, a.time)) > (state.businessProfile.appointmentDurationMin || 60) * 60000;
+    }
+    return false;
+  };
 
   const withMeta = list => list.map(a => ({
     ...a,
@@ -1279,8 +1292,13 @@ function computeVals(){
     statusColor: a.status === 'done' ? '#12a457' : a.status === 'cancelled' ? '#7d79a8' : a.status === 'no-show' ? '#c9791a' : accent
   }));
 
-  const todayList = withMeta(upcoming.filter(a => a.date === todayStr));
-  const upcomingList = withMeta(upcoming.filter(a => a.date !== todayStr));
+  // Each still-open booking lands in exactly one of three buckets: overdue
+  // (slot has passed, needs an outcome), today (still ahead of us today), or
+  // upcoming (a genuinely future date). Overdue ones are pulled out of the
+  // Today/Upcoming lists so they stop masquerading as appointments still to
+  // come -- they get their own "Needs attention" section instead.
+  const todayList = withMeta(upcoming.filter(a => a.date === todayStr && !isOverdue(a)));
+  const upcomingList = withMeta(upcoming.filter(a => a.date > todayStr));
   const hasOverlap = todayList.concat(upcomingList).some(a => a.overlap);
 
   const needsFollowUp = withMeta(upcoming.filter(isOverdue)).sort((a,b) => toDateObj(a.date,a.time) - toDateObj(b.date,b.time));
@@ -1314,6 +1332,36 @@ function computeVals(){
   // matching the same scope, instead of only weekTotal (last 7 days) sitting
   // next to a count of everything.
   const allTimeTotal = completed.reduce((sum,a) => sum + (+a.price || 0), 0);
+  // "This month" is the current calendar month (not a rolling 30 days), keyed
+  // off the YYYY-MM prefix of the booking date -- the same local-date basis
+  // every other date in the app uses, no Date math needed.
+  const thisMonthKey = todayStr.slice(0, 7);
+  const monthTotal = completed
+    .filter(a => (a.date || '').slice(0, 7) === thisMonthKey)
+    .reduce((sum,a) => sum + (+a.price || 0), 0);
+  // Month-by-month revenue so she can see the trend, not just this-week vs
+  // all-time. Only months with completed work show up; newest first, capped
+  // at the last 6 so the list stays glanceable.
+  const monthlyRevenue = (() => {
+    const m = new Map();
+    completed.forEach(a => {
+      const k = (a.date || '').slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(k)) return;
+      const e = m.get(k) || { key: k, count: 0, revenue: 0 };
+      e.count++; e.revenue += (+a.price || 0); m.set(k, e);
+    });
+    return [...m.values()]
+      .sort((x,y) => y.key.localeCompare(x.key))
+      .slice(0, 6)
+      .map(e => {
+        const [yy, mm] = e.key.split('-').map(Number);
+        return {
+          label: new Date(yy, mm - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          sub: `${e.count} job${e.count === 1 ? '' : 's'}`,
+          valueLabel: `${currency}${Math.round(e.revenue)}`
+        };
+      });
+  })();
   const completedList = withMeta(completed.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
 
   const noShows = s.appointments.filter(a => a.status === 'no-show');
@@ -1433,7 +1481,8 @@ function computeVals(){
     todayList, upcomingList,
     inventoryList, hasInventory: inventoryList.length > 0, lowStockCount: lowStockItems.length, hasLowStock: lowStockItems.length > 0,
     searchResults, searchEmptyLabel: searchQ ? 'No matching clients found.' : 'Type a name or phone number to search.',
-    weekTotal, allTimeTotal, completedCount: completed.length, completedList,
+    weekTotal, monthTotal, allTimeTotal, completedCount: completed.length, completedList,
+    monthlyRevenue, hasMonthlyRevenue: monthlyRevenue.length > 0,
     noShowList, hasNoShows: noShowList.length > 0,
     noShowsByClient, hasNoShowsByClient: noShowsByClient.length > 0,
     topClients, hasTopClients: topClients.length > 0,
@@ -1509,10 +1558,15 @@ function renderHome(v){
     </div>`;
   }
   if (v.hasNeedsFollowUp) {
-    html += `<div class="banner-warning-row" data-action="openAppt" data-id="${esc(v.needsFollowUp[0].id)}">
-      <div class="banner-warning-text">&#9888; ${esc(v.followUpLabel)}</div>
-      <div class="banner-warning-cta">Review &rarr;</div>
-    </div>`;
+    html += `<div class="banner-warning">&#9888; ${esc(v.followUpLabel)}</div>
+    <div class="appt-list" style="margin-top:10px">${v.needsFollowUp.map(a => `
+      <div class="appt-card appt-card--attention" data-action="openAppt" data-id="${esc(a.id)}">
+        <div>
+          <div class="appt-name">${esc(a.name)}</div>
+          <div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)}${a.timeLabel ? ' at ' + esc(a.timeLabel) : ''}</div>
+        </div>
+        <div class="banner-warning-cta">Did it happen? &rarr;</div>
+      </div>`).join('')}</div>`;
   }
   if (v.nextAppt) {
     const n = v.nextAppt;
@@ -1534,7 +1588,6 @@ function renderHome(v){
         <div style="text-align:right">
           <div class="appt-time">${esc(a.timeLabel)}</div>
           ${a.overlap ? '<div class="conflict-tag">&#9888; conflict</div>' : ''}
-          ${a.overdue ? '<div class="conflict-tag">&#9888; awaiting outcome</div>' : ''}
         </div>
       </div>`).join('')}</div>`;
   } else {
@@ -1760,9 +1813,17 @@ function renderEarnings(v){
   let html = `<div>
     <div class="stat-row">
       <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value">${esc(v.currency)}${v.weekTotal}</div></div>
+      <div class="stat-card"><div class="stat-label">This month</div><div class="stat-value">${esc(v.currency)}${v.monthTotal}</div></div>
+    </div>
+    <div class="stat-row">
       <div class="stat-card"><div class="stat-label">All-time revenue</div><div class="stat-value">${esc(v.currency)}${v.allTimeTotal}</div></div>
       <div class="stat-card"><div class="stat-label">Completed jobs</div><div class="stat-value">${v.completedCount}</div></div>
     </div>`;
+  if (v.hasMonthlyRevenue) {
+    html += `<div class="section-title">Revenue by month</div><div class="list-col">
+      ${v.monthlyRevenue.map(mo => `<div class="list-row"><div><div class="list-row-label">${esc(mo.label)}</div><div class="list-row-sub">${esc(mo.sub)}</div></div><div class="list-row-value">${esc(mo.valueLabel)}</div></div>`).join('')}
+    </div>`;
+  }
   html += `<div class="section-title">Completed history</div>`;
   if (v.completedList.length) {
     const visibleCompleted = v.completedList.slice(0, state.earningsCompletedVisible);

@@ -119,6 +119,7 @@ html, body { margin: 0; background: #e8e7f2; }
 .appt-card--today { background: #f1f0fa; border: 1px solid #dcd9ee; }
 .appt-card--upcoming { background: #fff; border: 1px solid #e3e1f0; cursor: pointer; }
 .appt-card--completed { background: #fff; border: 1px solid #e3e1f0; cursor: default; padding: 12px 14px; }
+.appt-card--attention { background: #fdecea; border: 1px solid #f5c2bb; }
 .appt-name { font-weight: 600; font-size: 14.5px; color: #2c2a52; }
 .appt-service { font-size: 12.5px; color: #7d79a8; margin-top: 2px; }
 .appt-time { font-weight: 700; color: var(--accent); font-size: 14px; }
