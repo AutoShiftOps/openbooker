@@ -51,8 +51,9 @@ const { bypassGate } = require('./lib/bypassGate');
   assert.strictEqual(await page.locator('.appt-card--upcoming').count(), 20, 'expected all 20 upcoming appointments after Show more');
   assert.strictEqual(await page.locator('[data-action="showMoreUpcoming"]').count(), 0, 'Show more button should be gone once everything is visible');
 
-  // Earnings: Completed history capped at 15.
+  // Earnings: Completed history capped at 15 (inside its collapsed section).
   await page.click('[data-action="goEarnings"]');
+  await page.click('.section-toggle:has-text("Completed history")');
   await page.waitForSelector('.appt-card--completed');
   assert.strictEqual(await page.locator('.appt-card--completed').count(), 15, 'expected 15 visible completed jobs before Show more');
   assert.strictEqual(await page.locator('[data-action="showMoreCompleted"]').count(), 1, 'expected a Show more button for completed history');

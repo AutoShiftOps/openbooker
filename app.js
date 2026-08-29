@@ -533,6 +533,9 @@ const state = {
   // Which month the History tab's revenue picker is showing (YYYY-MM); null =
   // default to the most recent month that has completed work.
   revenueMonth: null,
+  // Which collapsible History-screen sections are expanded ('completed',
+  // 'noshows', 'insights'). All collapsed by default so the screen stays short.
+  earningsOpen: [],
   // How many rows of each growing list to show before a "Show more" button --
   // otherwise these all grow unbounded as the business accumulates history.
   needsAttentionVisible: 3,
@@ -1041,6 +1044,12 @@ const Actions = {
     setState(s => ({ form: { ...s.form, name: client.name, phone: client.phone, address: client.address || s.form.address } }));
   },
   showMoreAttention: () => setState(s => ({ needsAttentionVisible: s.needsAttentionVisible + PAGE_SIZE })),
+  toggleEarningsSection: (id, value) => setState(s => {
+    const open = s.earningsOpen.slice();
+    const i = open.indexOf(value);
+    if (i === -1) open.push(value); else open.splice(i, 1);
+    return { earningsOpen: open };
+  }),
   showMoreUpcoming: () => setState(s => ({ homeUpcomingVisible: s.homeUpcomingVisible + PAGE_SIZE })),
   showMoreCompleted: () => setState(s => ({ earningsCompletedVisible: s.earningsCompletedVisible + PAGE_SIZE })),
   showMoreClients: () => setState(s => ({ clientsVisible: s.clientsVisible + PAGE_SIZE })),
@@ -1839,46 +1848,64 @@ function renderEarnings(v){
     <div class="list-row"><div><div class="list-row-label">${esc(sel.label)}</div><div class="list-row-sub">${sel.count} job${sel.count === 1 ? '' : 's'} completed</div></div><div class="list-row-value">${esc(v.currency)}${sel.revenue}</div></div>
     <div style="height:16px"></div>`;
   }
-  html += `<div class="section-title">Completed history</div>`;
+  // Everything below the headline numbers is collapsed by default -- Asha
+  // mostly opens History to check what she earned, and the full lists made
+  // the screen scroll for ages. Each header still shows the key count.
+  let completedBody;
   if (v.completedList.length) {
     const visibleCompleted = v.completedList.slice(0, state.earningsCompletedVisible);
-    html += `<div class="appt-list">${visibleCompleted.map(a => `
+    completedBody = `<div class="appt-list">${visibleCompleted.map(a => `
       <div class="appt-card appt-card--completed" data-action="openAppt" data-id="${esc(a.id)}" style="cursor:pointer">
         <div><div class="appt-name">${esc(a.name)}</div><div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)}</div></div>
         <div class="appt-price">${esc(a.priceLabel)}</div>
-      </div>`).join('')}</div>`;
-    html += renderShowMore(v.completedList.length, state.earningsCompletedVisible, 'showMoreCompleted');
+      </div>`).join('')}</div>${renderShowMore(v.completedList.length, state.earningsCompletedVisible, 'showMoreCompleted')}`;
   } else {
-    html += `<div class="empty-state">Nothing completed yet — mark bookings done from their detail screen.</div>`;
+    completedBody = `<div class="empty-state">Nothing completed yet — mark bookings done from their detail screen.</div>`;
   }
+  html += earningsSection('completed', 'Completed history', String(v.completedCount), completedBody);
+
   if (v.hasNoShows) {
-    html += `<div class="section-title">No-shows</div><div class="appt-list">${v.noShowList.map(a => `
+    let body = `<div class="appt-list">${v.noShowList.map(a => `
       <div class="appt-card appt-card--completed" data-action="openAppt" data-id="${esc(a.id)}" style="cursor:pointer">
         <div><div class="appt-name">${esc(a.name)}</div><div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)}</div></div>
       </div>`).join('')}</div>`;
     if (v.hasNoShowsByClient) {
-      html += `<div class="list-col" style="margin-top:8px">
+      body += `<div class="list-col" style="margin-top:8px">
         ${v.noShowsByClient.map(c => `<div class="list-row"><div class="list-row-label">${esc(c.label)}</div><div class="list-row-value" style="color:#c9791a">${esc(c.valueLabel)}</div></div>`).join('')}
       </div>`;
     }
+    html += earningsSection('noshows', 'No-shows', String(v.noShowList.length), body);
   }
-  if (v.hasTopClients) {
-    html += `<div class="section-title">Top clients</div><div class="list-col">
-      ${v.topClients.map(c => `<div class="list-row"><div><div class="list-row-label">${esc(c.label)}</div><div class="list-row-sub">${esc(c.sub)}</div></div><div class="list-row-value">${esc(c.valueLabel)}</div></div>`).join('')}
-    </div>`;
-  }
-  if (v.hasTopServices) {
-    html += `<div class="section-title">Most requested services</div><div class="list-col">
-      ${v.topServices.map(sv => `<div class="list-row"><div><div class="list-row-label">${esc(sv.label)}</div><div class="list-row-sub">${esc(sv.sub)}</div></div><div class="list-row-value" style="color:${esc(v.accent)}">${esc(sv.valueLabel)}</div></div>`).join('')}
-    </div>`;
-  }
-  if (v.hasPaymentBreakdown) {
-    html += `<div class="section-title">By payment method</div><div class="payment-pill-row">
-      ${v.paymentBreakdown.map(p => `<div class="payment-pill">${esc(p.label)}: ${esc(p.valueLabel)}</div>`).join('')}
-    </div>`;
+
+  if (v.hasTopClients || v.hasTopServices || v.hasPaymentBreakdown) {
+    let body = '';
+    if (v.hasTopClients) {
+      body += `<div class="section-title">Top clients</div><div class="list-col">
+        ${v.topClients.map(c => `<div class="list-row"><div><div class="list-row-label">${esc(c.label)}</div><div class="list-row-sub">${esc(c.sub)}</div></div><div class="list-row-value">${esc(c.valueLabel)}</div></div>`).join('')}
+      </div>`;
+    }
+    if (v.hasTopServices) {
+      body += `<div class="section-title">Most requested services</div><div class="list-col">
+        ${v.topServices.map(sv => `<div class="list-row"><div><div class="list-row-label">${esc(sv.label)}</div><div class="list-row-sub">${esc(sv.sub)}</div></div><div class="list-row-value" style="color:${esc(v.accent)}">${esc(sv.valueLabel)}</div></div>`).join('')}
+      </div>`;
+    }
+    if (v.hasPaymentBreakdown) {
+      body += `<div class="section-title">By payment method</div><div class="payment-pill-row">
+        ${v.paymentBreakdown.map(p => `<div class="payment-pill">${esc(p.label)}: ${esc(p.valueLabel)}</div>`).join('')}
+      </div>`;
+    }
+    html += earningsSection('insights', 'Insights', '', body);
   }
   html += '</div>';
   return html;
+}
+
+function earningsSection(key, title, meta, body){
+  const open = state.earningsOpen.indexOf(key) !== -1;
+  return `<div class="section-toggle" data-action="toggleEarningsSection" data-value="${key}">
+    <span>${esc(title)}${meta ? ` <span class="section-toggle-meta">${esc(meta)}</span>` : ''}</span>
+    <span class="section-toggle-chevron">${open ? '&#9650;' : '&#9660;'}</span>
+  </div>${open ? body : ''}`;
 }
 
 function renderDetail(v){

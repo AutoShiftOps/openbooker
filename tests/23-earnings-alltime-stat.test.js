@@ -46,8 +46,19 @@ const { bypassGate } = require('./lib/bypassGate');
   assert.strictEqual(values[allTimeIdx], '$350', 'all-time revenue should include both completed jobs (100+250)');
   assert.strictEqual(values[jobsIdx], '2', 'completed jobs count should be all-time (2), matching the all-time total');
 
+  // The lists below the headline numbers are collapsed by default to keep the
+  // History screen short; the header still shows the count.
+  assert.strictEqual(await page.locator('.appt-card--completed').count(), 0, 'completed history should start collapsed');
+  assert.ok((await page.locator('.section-toggle:has-text("Completed history")').textContent()).includes('2'), 'collapsed header shows the completed count');
+  await page.click('.section-toggle:has-text("Completed history")');
+  await page.waitForSelector('.appt-card--completed');
   const completedRows = await page.locator('.appt-card--completed').count();
   assert.strictEqual(completedRows, 2, 'completed history list should show both jobs, matching the all-time stat');
+
+  // Toggling again collapses it back.
+  await page.click('.section-toggle:has-text("Completed history")');
+  await page.waitForTimeout(50);
+  assert.strictEqual(await page.locator('.appt-card--completed').count(), 0, 'section collapses again on second tap');
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 23-earnings-alltime-stat');

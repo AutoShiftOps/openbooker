@@ -241,6 +241,15 @@ html, body { margin: 0; background: #e8e7f2; }
 .list-row-sub { font-size: 11.5px; color: #7d79a8; }
 .list-row-value { font-weight: 700; color: #2c2a52; font-size: 13.5px; }
 
+/* Collapsible sections (History screen) */
+.section-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 13px 2px; margin-top: 6px; border-top: 1px solid #e3e1f0; cursor: pointer;
+  font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 15px; color: #453f78;
+}
+.section-toggle-meta { color: #9793bf; font-weight: 600; font-size: 12.5px; }
+.section-toggle-chevron { color: #9793bf; font-size: 11px; flex-shrink: 0; }
+
 /* Detail screen */
 .back-link { font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 14px; cursor: pointer; }
 .detail-card { background: #f1f0fa; border-radius: 18px; padding: 18px; margin-bottom: 14px; }
