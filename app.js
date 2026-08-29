@@ -530,8 +530,12 @@ const state = {
   viewingClientId: null,
   blockedDates: [],
   businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
+  // Which month the History tab's revenue picker is showing (YYYY-MM); null =
+  // default to the most recent month that has completed work.
+  revenueMonth: null,
   // How many rows of each growing list to show before a "Show more" button --
   // otherwise these all grow unbounded as the business accumulates history.
+  needsAttentionVisible: 3,
   homeUpcomingVisible: PAGE_SIZE,
   earningsCompletedVisible: PAGE_SIZE,
   clientsVisible: PAGE_SIZE
@@ -1036,6 +1040,7 @@ const Actions = {
     if (!client) return;
     setState(s => ({ form: { ...s.form, name: client.name, phone: client.phone, address: client.address || s.form.address } }));
   },
+  showMoreAttention: () => setState(s => ({ needsAttentionVisible: s.needsAttentionVisible + PAGE_SIZE })),
   showMoreUpcoming: () => setState(s => ({ homeUpcomingVisible: s.homeUpcomingVisible + PAGE_SIZE })),
   showMoreCompleted: () => setState(s => ({ earningsCompletedVisible: s.earningsCompletedVisible + PAGE_SIZE })),
   showMoreClients: () => setState(s => ({ clientsVisible: s.clientsVisible + PAGE_SIZE })),
@@ -1339,10 +1344,10 @@ function computeVals(){
   const monthTotal = completed
     .filter(a => (a.date || '').slice(0, 7) === thisMonthKey)
     .reduce((sum,a) => sum + (+a.price || 0), 0);
-  // Month-by-month revenue so she can see the trend, not just this-week vs
-  // all-time. Only months with completed work show up; newest first, capped
-  // at the last 6 so the list stays glanceable.
-  const monthlyRevenue = (() => {
+  // Every month that has completed work, newest first -- the History tab's
+  // revenue picker lists these so she can pull up any month in any year, not
+  // just recent ones.
+  const revenueMonths = (() => {
     const m = new Map();
     completed.forEach(a => {
       const k = (a.date || '').slice(0, 7);
@@ -1352,16 +1357,20 @@ function computeVals(){
     });
     return [...m.values()]
       .sort((x,y) => y.key.localeCompare(x.key))
-      .slice(0, 6)
       .map(e => {
         const [yy, mm] = e.key.split('-').map(Number);
         return {
+          key: e.key,
           label: new Date(yy, mm - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-          sub: `${e.count} job${e.count === 1 ? '' : 's'}`,
-          valueLabel: `${currency}${Math.round(e.revenue)}`
+          count: e.count,
+          revenue: Math.round(e.revenue)
         };
       });
   })();
+  // The picker shows the user's chosen month if it still has data, else the
+  // most recent month with revenue.
+  const selectedRevenueMonth = revenueMonths.find(r => r.key === s.revenueMonth)
+    || revenueMonths[0] || null;
   const completedList = withMeta(completed.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
 
   const noShows = s.appointments.filter(a => a.status === 'no-show');
@@ -1482,7 +1491,7 @@ function computeVals(){
     inventoryList, hasInventory: inventoryList.length > 0, lowStockCount: lowStockItems.length, hasLowStock: lowStockItems.length > 0,
     searchResults, searchEmptyLabel: searchQ ? 'No matching clients found.' : 'Type a name or phone number to search.',
     weekTotal, monthTotal, allTimeTotal, completedCount: completed.length, completedList,
-    monthlyRevenue, hasMonthlyRevenue: monthlyRevenue.length > 0,
+    revenueMonths, selectedRevenueMonth, hasRevenueMonths: revenueMonths.length > 0,
     noShowList, hasNoShows: noShowList.length > 0,
     noShowsByClient, hasNoShowsByClient: noShowsByClient.length > 0,
     topClients, hasTopClients: topClients.length > 0,
@@ -1558,15 +1567,17 @@ function renderHome(v){
     </div>`;
   }
   if (v.hasNeedsFollowUp) {
+    const shownAttention = v.needsFollowUp.slice(0, state.needsAttentionVisible);
     html += `<div class="banner-warning">&#9888; ${esc(v.followUpLabel)}</div>
-    <div class="appt-list" style="margin-top:10px">${v.needsFollowUp.map(a => `
+    <div class="appt-list" style="margin-top:10px">${shownAttention.map(a => `
       <div class="appt-card appt-card--attention" data-action="openAppt" data-id="${esc(a.id)}">
         <div>
           <div class="appt-name">${esc(a.name)}</div>
           <div class="appt-service">${esc(a.service)} &middot; ${esc(a.dateLabel)}${a.timeLabel ? ' at ' + esc(a.timeLabel) : ''}</div>
         </div>
         <div class="banner-warning-cta">Did it happen? &rarr;</div>
-      </div>`).join('')}</div>`;
+      </div>`).join('')}</div>
+    ${renderShowMore(v.needsFollowUp.length, state.needsAttentionVisible, 'showMoreAttention')}`;
   }
   if (v.nextAppt) {
     const n = v.nextAppt;
@@ -1819,10 +1830,14 @@ function renderEarnings(v){
       <div class="stat-card"><div class="stat-label">All-time revenue</div><div class="stat-value">${esc(v.currency)}${v.allTimeTotal}</div></div>
       <div class="stat-card"><div class="stat-label">Completed jobs</div><div class="stat-value">${v.completedCount}</div></div>
     </div>`;
-  if (v.hasMonthlyRevenue) {
-    html += `<div class="section-title">Revenue by month</div><div class="list-col">
-      ${v.monthlyRevenue.map(mo => `<div class="list-row"><div><div class="list-row-label">${esc(mo.label)}</div><div class="list-row-sub">${esc(mo.sub)}</div></div><div class="list-row-value">${esc(mo.valueLabel)}</div></div>`).join('')}
-    </div>`;
+  if (v.hasRevenueMonths) {
+    const sel = v.selectedRevenueMonth;
+    html += `<div class="section-title">Revenue by month</div>
+    <select class="field" data-bind="revenueMonth" style="margin-bottom:10px">
+      ${v.revenueMonths.map(r => `<option value="${esc(r.key)}" ${r.key === sel.key ? 'selected' : ''}>${esc(r.label)} — ${esc(v.currency)}${r.revenue}</option>`).join('')}
+    </select>
+    <div class="list-row"><div><div class="list-row-label">${esc(sel.label)}</div><div class="list-row-sub">${sel.count} job${sel.count === 1 ? '' : 's'} completed</div></div><div class="list-row-value">${esc(v.currency)}${sel.revenue}</div></div>
+    <div style="height:16px"></div>`;
   }
   html += `<div class="section-title">Completed history</div>`;
   if (v.completedList.length) {
@@ -2315,6 +2330,68 @@ function render(){
   const focusInfo = captureFocus();
   root.innerHTML = renderApp();
   restoreFocus(focusInfo);
+  syncNavHistory();
+}
+
+// ---- Hardware / browser Back button ----
+// This is a single-page app: every "screen" is just state, so the Back button
+// -- Android's especially, in an installed PWA -- has nothing to pop and
+// closes the whole app even when the user is several screens deep. We mirror
+// the current screen into the History API: navigating in-app pushes an entry,
+// Back pops it and we restore that screen, and only Home actually exits. The
+// detail screen's complete / reschedule / edit panels count as their own step
+// so Back closes the panel first.
+let _restoringNav = false;
+
+function navKey(s){
+  if (s.screen === 'detail' && s.detailId){
+    if (s.completingId === s.detailId) return 'detail:' + s.detailId + '/completing';
+    if (s.reschedulingId === s.detailId) return 'detail:' + s.detailId + '/rescheduling';
+    if (s.editingId === s.detailId) return 'detail:' + s.detailId + '/editing';
+    return 'detail:' + s.detailId;
+  }
+  if (s.screen === 'search' && s.viewingClientId) return 'client:' + s.viewingClientId;
+  return s.screen || 'home';
+}
+
+function restoreNav(key){
+  _restoringNav = true;
+  if (key.indexOf('detail:') === 0){
+    const slash = key.indexOf('/');
+    const id = slash === -1 ? key.slice(7) : key.slice(7, slash);
+    const panel = slash === -1 ? '' : key.slice(slash + 1);
+    setState({
+      screen: 'detail', detailId: id,
+      completingId: panel === 'completing' ? id : null,
+      reschedulingId: panel === 'rescheduling' ? id : null,
+      editingId: panel === 'editing' ? id : null
+    });
+  } else if (key.indexOf('client:') === 0){
+    setState({ screen: 'search', viewingClientId: key.slice(7) });
+  } else {
+    const known = { add:1, search:1, earnings:1, inventory:1, settings:1, calendar:1 };
+    setState({
+      screen: known[key] ? key : 'home',
+      detailId: null, viewingClientId: null,
+      completingId: null, reschedulingId: null, editingId: null
+    });
+  }
+  _restoringNav = false;
+}
+
+function syncNavHistory(){
+  if (_restoringNav || typeof history === 'undefined') return;
+  const key = navKey(state);
+  if (history.state && history.state.navKey === key) return;
+  history.pushState({ navKey: key }, '');
+}
+
+function initNavHistory(){
+  if (typeof history === 'undefined') return;
+  history.replaceState({ navKey: navKey(state) }, '');
+  window.addEventListener('popstate', function(e){
+    restoreNav((e.state && e.state.navKey) || 'home');
+  });
 }
 
 // Moving focus from one field to the next (e.g. tapping the date field right
@@ -2431,6 +2508,7 @@ root.addEventListener('change', e => {
 // ---- Init ----
 loadPersisted();
 initCloud();
+initNavHistory();
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});

@@ -1,8 +1,8 @@
-// Covers: the Earnings/History screen's monthly revenue -- Asha couldn't see
-// how much she made in a given month (only "This week" and "All-time"
-// existed). Confirms the new "This month" stat card reflects the current
-// calendar month, and the "Revenue by month" breakdown lists each month with
-// completed work, newest first, with the right totals and job counts.
+// Covers: the History screen's monthly revenue -- Asha couldn't see how much
+// she made in a given month (only "This week" and "All-time" existed).
+// Confirms the "This month" stat card reflects the current calendar month,
+// and the "Revenue by month" picker lists every month with completed work
+// (newest first, any year) and shows the chosen month's total + job count.
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
@@ -20,24 +20,23 @@ const { bypassGate } = require('./lib/bypassGate');
   const y = today.getFullYear();
   const m = today.getMonth(); // 0-indexed
 
-  // First of the current month -- always on/before today, so it counts as
-  // "this month" regardless of what day the test runs.
-  const thisMonthDate = `${y}-${pad(m + 1)}-01`;
-  const prev = new Date(y, m - 1, 15); // 15th of last month (handles year rollover)
-  const prevMonthDate = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-15`;
+  const thisMonth = new Date(y, m, 1);       // 1st of current month -- on/before today
+  const prevMonth = new Date(y, m - 1, 15);  // last month
+  const oldMonth = new Date(y, m - 18, 10);  // ~1.5 years ago -- a prior calendar year
 
-  const monthLabel = d => new Date(d.getFullYear(), d.getMonth(), 1)
+  const key = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  const ymd = d => `${key(d)}-${pad(d.getDate())}`;
+  const label = d => new Date(d.getFullYear(), d.getMonth(), 1)
     .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const thisMonthLabel = monthLabel(new Date(y, m, 1));
-  const prevMonthLabel = monthLabel(prev);
 
   await page.addInitScript((dates) => {
     localStorage.setItem('asha_appointments_v1', JSON.stringify([
-      { id: 'tm1', name: 'This Month Client', phone: '4165550001', service: 'Facial', date: dates.thisMonth, time: '10:00', address: '', price: '120', notes: '', status: 'done' },
-      { id: 'pm1', name: 'Last Month A', phone: '4165550002', service: 'Makeup', date: dates.prevMonth, time: '10:00', address: '', price: '200', notes: '', status: 'done' },
-      { id: 'pm2', name: 'Last Month B', phone: '4165550003', service: 'Threading', date: dates.prevMonth, time: '12:00', address: '', price: '80', notes: '', status: 'done' },
+      { id: 'tm1', name: 'A', phone: '4165550001', service: 'Facial', date: dates.thisMonth, time: '10:00', address: '', price: '120', notes: '', status: 'done' },
+      { id: 'pm1', name: 'B', phone: '4165550002', service: 'Makeup', date: dates.prevMonth, time: '10:00', address: '', price: '200', notes: '', status: 'done' },
+      { id: 'pm2', name: 'C', phone: '4165550003', service: 'Threading', date: dates.prevMonth, time: '12:00', address: '', price: '80', notes: '', status: 'done' },
+      { id: 'om1', name: 'D', phone: '4165550004', service: 'Bridal', date: dates.oldMonth, time: '09:00', address: '', price: '500', notes: '', status: 'done' },
     ]));
-  }, { thisMonth: thisMonthDate, prevMonth: prevMonthDate });
+  }, { thisMonth: ymd(thisMonth), prevMonth: ymd(prevMonth), oldMonth: ymd(oldMonth) });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
   await bypassGate(page);
@@ -47,24 +46,27 @@ const { bypassGate } = require('./lib/bypassGate');
   // "This month" stat card
   const labels = await page.locator('.stat-label').allTextContents();
   const values = await page.locator('.stat-value').allTextContents();
-  assert.ok(labels.includes('This month'), 'expected a "This month" stat card');
-  assert.strictEqual(values[labels.indexOf('This month')], '$120', 'this month should only include the current-month completed job');
-  assert.strictEqual(values[labels.indexOf('All-time revenue')], '$400', 'all-time should still be 120+200+80');
+  assert.strictEqual(values[labels.indexOf('This month')], '$120', 'This month card should only count the current-month job');
+  assert.strictEqual(values[labels.indexOf('All-time revenue')], '$900', 'all-time should be 120+200+80+500');
 
-  // "Revenue by month" breakdown, newest first
-  const section = page.locator('.section-title:has-text("Revenue by month") + .list-col');
-  await section.waitFor();
-  const rowLabels = await section.locator('.list-row-label').allTextContents();
-  const rowValues = await section.locator('.list-row-value').allTextContents();
-  const rowSubs = await section.locator('.list-row-sub').allTextContents();
+  // Revenue-by-month picker: one option per month with work, newest first
+  const sel = page.locator('select[data-bind="revenueMonth"]');
+  const optValues = await sel.locator('option').evaluateAll(os => os.map(o => o.value));
+  const optTexts = await sel.locator('option').allTextContents();
+  assert.deepStrictEqual(optValues, [key(thisMonth), key(prevMonth), key(oldMonth)], 'months listed newest first');
+  assert.ok(optTexts[0].includes(label(thisMonth)) && optTexts[0].includes('$120'));
+  assert.ok(optTexts[1].includes('$280'), 'last month option should show summed revenue 200+80');
+  assert.ok(optTexts[2].includes(label(oldMonth)) && optTexts[2].includes('$500'), 'older-year month is listed: ' + optTexts[2]);
 
-  assert.strictEqual(rowLabels.length, 2, 'expected exactly two months with completed work');
-  assert.strictEqual(rowLabels[0], thisMonthLabel, 'newest month should be listed first');
-  assert.strictEqual(rowValues[0], '$120');
-  assert.strictEqual(rowSubs[0], '1 job');
-  assert.strictEqual(rowLabels[1], prevMonthLabel);
-  assert.strictEqual(rowValues[1], '$280', 'last month should sum both of its jobs (200+80)');
-  assert.strictEqual(rowSubs[1], '2 jobs');
+  // Default selection = most recent month
+  let summary = await page.locator('select[data-bind="revenueMonth"] + .list-row').textContent();
+  assert.ok(summary.includes(label(thisMonth)) && summary.includes('$120') && summary.includes('1 job'), 'default summary: ' + summary);
+
+  // Pick the older-year month -> summary updates
+  await sel.selectOption(key(oldMonth));
+  await page.waitForTimeout(100);
+  summary = await page.locator('select[data-bind="revenueMonth"] + .list-row').textContent();
+  assert.ok(summary.includes(label(oldMonth)) && summary.includes('$500') && summary.includes('1 job'), 'picked-month summary: ' + summary);
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 29-monthly-revenue');
