@@ -40,6 +40,7 @@ const { bypassGate } = require('./lib/bypassGate');
   // "Book again" is the deliberate exception -- still blank.
   await page.click('[data-action="goHome"]');
   await page.click('[data-action="goEarnings"]');
+  await page.click('.period-chip:has-text("All time")'); // the completed job is dated earlier this year
   await page.click('.section-toggle:has-text("Completed history")');
   await page.waitForSelector('.appt-card--completed');
   await page.click('.appt-card--completed');

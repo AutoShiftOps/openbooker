@@ -52,7 +52,9 @@ const { bypassGate } = require('./lib/bypassGate');
   assert.strictEqual(await page.locator('[data-action="showMoreUpcoming"]').count(), 0, 'Show more button should be gone once everything is visible');
 
   // Earnings: Completed history capped at 15 (inside its collapsed section).
+  // The completed jobs are dated in January, so widen the range to "All time".
   await page.click('[data-action="goEarnings"]');
+  await page.click('.period-chip:has-text("All time")');
   await page.click('.section-toggle:has-text("Completed history")');
   await page.waitForSelector('.appt-card--completed');
   assert.strictEqual(await page.locator('.appt-card--completed').count(), 15, 'expected 15 visible completed jobs before Show more');

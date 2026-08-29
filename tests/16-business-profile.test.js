@@ -74,9 +74,9 @@ const { bypassGate } = require('./lib/bypassGate');
   await page.locator('[data-bind="businessProfile.currency"]').blur();
   await page.waitForTimeout(100);
   await page.click('[data-action="goEarnings"]');
-  await page.waitForSelector('.stat-value');
-  const statText = await page.locator('.stat-card .stat-value').first().textContent();
-  assert.ok(statText.startsWith('EUR'), 'expected the edited currency symbol in the earnings stat, got: ' + statText);
+  await page.waitForSelector('.period-summary-value');
+  const statText = await page.locator('.period-summary-value').first().textContent();
+  assert.ok(statText.startsWith('EUR'), 'expected the edited currency symbol in the earnings summary, got: ' + statText);
 
   // 5. Business hours change the Add screen's availability slot count.
   await page.click('[data-action="goSettings"]');

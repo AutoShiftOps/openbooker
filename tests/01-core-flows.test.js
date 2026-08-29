@@ -63,10 +63,10 @@ const { bypassGate } = require('./lib/bypassGate');
 
   // 4. History nav rename + CAD currency.
   await page.click('[data-action="goEarnings"]');
-  await page.waitForSelector('.stat-value');
+  await page.waitForSelector('.period-summary-value');
   const navLabels = await page.locator('.nav-label').allTextContents();
   if (!navLabels.includes('History')) throw new Error('FAIL: nav label not renamed to History, got ' + navLabels.join(','));
-  const statText = await page.locator('.stat-value').first().textContent();
+  const statText = await page.locator('.period-summary-value').first().textContent();
   if (!statText.trim().startsWith('$')) throw new Error('FAIL: currency is not $ (CAD), got ' + statText);
   console.log('History nav rename + CAD currency OK');
 

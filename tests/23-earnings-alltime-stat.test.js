@@ -1,8 +1,7 @@
-// Covers: the Earnings screen's stat row -- "This week" only reflects the
-// last 7 days, but the "Completed jobs" count (and the list below it) is
-// all-time. Without an "All-time revenue" stat next to it, the $ figure at
-// the top didn't match the scope of the list underneath it. Confirms both
-// numbers are correct and distinct.
+// Covers: the History screen's date-range controls -- preset chips (This
+// month / Last month / This year / All time) and the From/To calendar
+// inputs. The revenue summary and every collapsible section (Completed
+// history, No-shows, Insights) reflect only the chosen range.
 const { chromium } = require('playwright');
 const assert = require('assert');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8888';
@@ -15,52 +14,59 @@ const { bypassGate } = require('./lib/bypassGate');
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
 
+  const pad = n => String(n).padStart(2, '0');
   const today = new Date();
-  const recentDate = new Date(today.getTime() - 2 * 86400000); // 2 days ago -- within this week
-  const oldDate = new Date(today.getTime() - 30 * 86400000); // 30 days ago -- outside this week
-  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const thisMonthDate = `${y}-${pad(m + 1)}-05`;
+  const prev = new Date(y, m - 1, 15);
+  const prevMonthDate = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-15`;
+  const prevFrom = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-01`;
+  const prevTo = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate())}`;
 
-  await page.addInitScript((dates) => {
+  await page.addInitScript((d) => {
     localStorage.setItem('asha_appointments_v1', JSON.stringify([
-      { id: 'recent1', name: 'Recent Client', phone: '4165550001', service: 'Consultation', date: dates.recent, time: '10:00', address: '', price: '100', notes: '', status: 'done' },
-      { id: 'old1', name: 'Old Client', phone: '4165550002', service: 'Consultation', date: dates.old, time: '10:00', address: '', price: '250', notes: '', status: 'done' },
+      { id: 'tm', name: 'This Month', phone: '4165550001', service: 'Facial', date: d.thisMonth, time: '10:00', address: '', price: '100', notes: '', status: 'done' },
+      { id: 'lm', name: 'Last Month', phone: '4165550002', service: 'Makeup', date: d.prevMonth, time: '10:00', address: '', price: '250', notes: '', status: 'done' },
     ]));
-  }, { recent: fmt(recentDate), old: fmt(oldDate) });
+  }, { thisMonth: thisMonthDate, prevMonth: prevMonthDate });
 
   await page.goto(BASE_URL + '/index.html', { waitUntil: 'load' });
   await bypassGate(page);
   await page.click('[data-action="goEarnings"]');
-  await page.waitForSelector('.stat-value');
+  await page.waitForSelector('.period-summary-value');
 
-  const labels = await page.locator('.stat-label').allTextContents();
-  assert.ok(labels.includes('This week'), 'expected a "This week" stat');
-  assert.ok(labels.includes('All-time revenue'), 'expected an "All-time revenue" stat');
-  assert.ok(labels.includes('Completed jobs'), 'expected a "Completed jobs" stat');
+  const summary = () => page.locator('.period-summary-value').textContent();
+  const sub = () => page.locator('.period-summary-sub').textContent();
 
-  const values = await page.locator('.stat-value').allTextContents();
-  const weekIdx = labels.indexOf('This week');
-  const allTimeIdx = labels.indexOf('All-time revenue');
-  const jobsIdx = labels.indexOf('Completed jobs');
+  // Default range is the current month.
+  assert.strictEqual(await summary(), '$100', 'defaults to this month');
+  assert.ok((await sub()).includes('1 job'), 'this-month sub shows 1 job');
+  assert.ok(await page.locator('.period-chip--active:has-text("This month")').count() > 0, '"This month" chip is active by default');
+  assert.strictEqual(await page.locator('.section-toggle:has-text("Completed history")').textContent().then(t => t.replace(/\D/g, '')), '1', 'Completed history count is scoped to the period');
 
-  assert.strictEqual(values[weekIdx], '$100', 'this week should only include the recent completed job');
-  assert.strictEqual(values[allTimeIdx], '$350', 'all-time revenue should include both completed jobs (100+250)');
-  assert.strictEqual(values[jobsIdx], '2', 'completed jobs count should be all-time (2), matching the all-time total');
+  // Last month
+  await page.click('.period-chip:has-text("Last month")');
+  await page.waitForTimeout(80);
+  assert.strictEqual(await summary(), '$250', 'Last month preset');
 
-  // The lists below the headline numbers are collapsed by default to keep the
-  // History screen short; the header still shows the count.
-  assert.strictEqual(await page.locator('.appt-card--completed').count(), 0, 'completed history should start collapsed');
-  assert.ok((await page.locator('.section-toggle:has-text("Completed history")').textContent()).includes('2'), 'collapsed header shows the completed count');
+  // All time
+  await page.click('.period-chip:has-text("All time")');
+  await page.waitForTimeout(80);
+  assert.strictEqual(await summary(), '$350', 'All time = both jobs');
+  assert.ok((await sub()).includes('2 jobs'), 'all-time sub shows 2 jobs');
   await page.click('.section-toggle:has-text("Completed history")');
   await page.waitForSelector('.appt-card--completed');
-  const completedRows = await page.locator('.appt-card--completed').count();
-  assert.strictEqual(completedRows, 2, 'completed history list should show both jobs, matching the all-time stat');
+  assert.strictEqual(await page.locator('.appt-card--completed').count(), 2, 'both completed jobs listed under All time');
 
-  // Toggling again collapses it back.
-  await page.click('.section-toggle:has-text("Completed history")');
-  await page.waitForTimeout(50);
-  assert.strictEqual(await page.locator('.appt-card--completed').count(), 0, 'section collapses again on second tap');
+  // Custom range via the From/To calendar inputs -> just last month
+  await page.fill('input[data-bind="earningsFrom"]', prevFrom);
+  await page.fill('input[data-bind="earningsTo"]', prevTo);
+  await page.waitForTimeout(120);
+  assert.strictEqual(await summary(), '$250', 'custom range covering only last month');
+  assert.strictEqual(await page.locator('.appt-card--completed').count(), 1, 'completed list also narrows to the custom range');
 
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
-  console.log('PASS: 23-earnings-alltime-stat');
+  console.log('PASS: 23-earnings-date-range');
   await browser.close();
-})().catch(e => { console.error('FAIL: 23-earnings-alltime-stat —', e.message || e); process.exit(1); });
+})().catch(e => { console.error('FAIL: 23-earnings-date-range —', e.message || e); process.exit(1); });

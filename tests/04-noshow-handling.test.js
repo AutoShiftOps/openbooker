@@ -61,7 +61,7 @@ const { bypassGate } = require('./lib/bypassGate');
   assert.strictEqual(attentionAfter, 0, 'Needs attention row still showing after marking no-show');
 
   await page.click('[data-action="goEarnings"]');
-  await page.waitForSelector('.stat-value');
+  await page.waitForSelector('.period-summary-value');
   const noShowSectionCount = await page.locator('text=No-shows').count();
   assert.ok(noShowSectionCount > 0, 'No-shows section missing from History');
 

@@ -126,6 +126,48 @@ function fmtDateLabel(dateStr){
   const d=toDateObj(dateStr,'00:00');
   return d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 }
+function fmtShortDate(dateStr){
+  if(!dateStr) return '';
+  const d=toDateObj(dateStr,'00:00');
+  return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); // "5 Aug 2026"
+}
+// First and last day of the calendar month containing `d`, as YYYY-MM-DD.
+function monthBounds(d){
+  const y=d.getFullYear(), m=d.getMonth();
+  return { from:`${y}-${pad(m+1)}-01`, to:`${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}` };
+}
+// The History screen's date-range preset chips. `now` is passed so it stays
+// testable and recomputes as the month rolls over.
+function periodPresets(now){
+  const y=now.getFullYear();
+  const tm=monthBounds(now);
+  const lm=monthBounds(new Date(y, now.getMonth()-1, 1));
+  return {
+    thismonth:{ label:'This month', from:tm.from, to:tm.to },
+    lastmonth:{ label:'Last month', from:lm.from, to:lm.to },
+    thisyear: { label:'This year',  from:`${y}-01-01`, to:`${y}-12-31` },
+    alltime:  { label:'All time',   from:'', to:'' }
+  };
+}
+function matchPeriodPreset(from, to, now){
+  const presets=periodPresets(now);
+  for(const k in presets){ if(presets[k].from===(from||'') && presets[k].to===(to||'')) return k; }
+  return '';
+}
+// Human label for a from/to range: a whole calendar month -> "August 2026",
+// a whole year -> "2026", nothing set -> "All time", else "5 Aug – 12 Sep 2026".
+function describePeriod(from, to){
+  if(!from && !to) return 'All time';
+  if(!from) return `Up to ${fmtShortDate(to)}`;
+  if(!to) return `From ${fmtShortDate(from)}`;
+  const [fy,fm,fd]=from.split('-').map(Number);
+  const [ty,tm,td]=to.split('-').map(Number);
+  if(fy===ty && fm===tm && fd===1 && td===new Date(ty,tm,0).getDate()){
+    return new Date(fy,fm-1,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  }
+  if(fy===ty && fm===1 && fd===1 && tm===12 && td===31) return `${fy}`;
+  return `${fmtShortDate(from)} – ${fmtShortDate(to)}`;
+}
 function fmtTimeLabel(timeStr){
   if(!timeStr) return '';
   const [h,m]=timeStr.split(':').map(Number);
@@ -530,9 +572,10 @@ const state = {
   viewingClientId: null,
   blockedDates: [],
   businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
-  // Which month the History tab's revenue picker is showing (YYYY-MM); null =
-  // default to the most recent month that has completed work.
-  revenueMonth: null,
+  // The History tab's date range (YYYY-MM-DD; '' = open-ended). Defaults to
+  // the current calendar month; preset chips and the two date inputs change it.
+  earningsFrom: monthBounds(new Date()).from,
+  earningsTo: monthBounds(new Date()).to,
   // Which collapsible History-screen sections are expanded ('completed',
   // 'noshows', 'insights'). All collapsed by default so the screen stays short.
   earningsOpen: [],
@@ -1050,6 +1093,10 @@ const Actions = {
     if (i === -1) open.push(value); else open.splice(i, 1);
     return { earningsOpen: open };
   }),
+  setEarningsPeriod: (id, value) => {
+    const p = periodPresets(new Date())[value];
+    if (p) setState({ earningsFrom: p.from, earningsTo: p.to });
+  },
   showMoreUpcoming: () => setState(s => ({ homeUpcomingVisible: s.homeUpcomingVisible + PAGE_SIZE })),
   showMoreCompleted: () => setState(s => ({ earningsCompletedVisible: s.earningsCompletedVisible + PAGE_SIZE })),
   showMoreClients: () => setState(s => ({ clientsVisible: s.clientsVisible + PAGE_SIZE })),
@@ -1339,59 +1386,36 @@ function computeVals(){
   const searchQ = (s.search || '').toLowerCase();
 
   const completed = s.appointments.filter(a => a.status === 'done');
-  const weekAgo = new Date(now.getTime() - 7*86400000);
-  const weekTotal = completed.filter(a => a.date && toDateObj(a.date,'00:00') >= weekAgo).reduce((sum,a) => sum + (+a.price || 0), 0);
-  // "Completed jobs" below counts every completed job ever, same as the full
-  // history list beneath it -- this all-time total keeps the $ figure
-  // matching the same scope, instead of only weekTotal (last 7 days) sitting
-  // next to a count of everything.
-  const allTimeTotal = completed.reduce((sum,a) => sum + (+a.price || 0), 0);
-  // "This month" is the current calendar month (not a rolling 30 days), keyed
-  // off the YYYY-MM prefix of the booking date -- the same local-date basis
-  // every other date in the app uses, no Date math needed.
-  const thisMonthKey = todayStr.slice(0, 7);
-  const monthTotal = completed
-    .filter(a => (a.date || '').slice(0, 7) === thisMonthKey)
-    .reduce((sum,a) => sum + (+a.price || 0), 0);
-  // Every month that has completed work, newest first -- the History tab's
-  // revenue picker lists these so she can pull up any month in any year, not
-  // just recent ones.
-  const revenueMonths = (() => {
-    const m = new Map();
-    completed.forEach(a => {
-      const k = (a.date || '').slice(0, 7);
-      if (!/^\d{4}-\d{2}$/.test(k)) return;
-      const e = m.get(k) || { key: k, count: 0, revenue: 0 };
-      e.count++; e.revenue += (+a.price || 0); m.set(k, e);
-    });
-    return [...m.values()]
-      .sort((x,y) => y.key.localeCompare(x.key))
-      .map(e => {
-        const [yy, mm] = e.key.split('-').map(Number);
-        return {
-          key: e.key,
-          label: new Date(yy, mm - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-          count: e.count,
-          revenue: Math.round(e.revenue)
-        };
-      });
-  })();
-  // The picker shows the user's chosen month if it still has data, else the
-  // most recent month with revenue.
-  const selectedRevenueMonth = revenueMonths.find(r => r.key === s.revenueMonth)
-    || revenueMonths[0] || null;
-  const completedList = withMeta(completed.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
+  const allNoShows = s.appointments.filter(a => a.status === 'no-show');
 
-  const noShows = s.appointments.filter(a => a.status === 'no-show');
-  const noShowList = withMeta(noShows.sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
-  const noShowsByClient = byKey(noShows, a => a.name).sort((a,b) => b.count - a.count)
+  // The whole History screen is scoped to a from/to date range (preset chips
+  // + two calendar inputs). The revenue total, the completed-jobs list,
+  // no-shows, and the top clients/services/payment breakdown all reflect just
+  // that window -- so Asha can pull up any month or span, in any year, not a
+  // fixed recent list. Dates are zero-padded YYYY-MM-DD, so a string compare
+  // is chronological; a blank bound means open-ended on that side.
+  const periodFrom = s.earningsFrom || '0000-01-01';
+  const periodTo = s.earningsTo || '9999-12-31';
+  const inPeriod = a => a.date && a.date >= periodFrom && a.date <= periodTo;
+
+  const periodCompleted = completed.filter(inPeriod);
+  const periodNoShows = allNoShows.filter(inPeriod);
+  const periodRevenue = periodCompleted.reduce((sum,a) => sum + (+a.price || 0), 0);
+  const periodLabel = describePeriod(s.earningsFrom, s.earningsTo);
+  const activePeriodPreset = matchPeriodPreset(s.earningsFrom, s.earningsTo, now);
+  const periodPresetList = Object.keys(periodPresets(now)).map(k => ({ key: k, label: periodPresets(now)[k].label }));
+
+  const completedList = withMeta(periodCompleted.slice().sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
+
+  const noShowList = withMeta(periodNoShows.slice().sort((a,b) => toDateObj(b.date||'1970-01-01','00:00') - toDateObj(a.date||'1970-01-01','00:00')));
+  const noShowsByClient = byKey(periodNoShows, a => a.name).sort((a,b) => b.count - a.count)
     .map(c => ({ label: c.key, sub: `${c.count} no-show${c.count===1?'':'s'}`, valueLabel: `${c.count}` }));
 
-  const topClients = byKey(completed, a => a.name).sort((a,b) => b.revenue - a.revenue).slice(0,5)
+  const topClients = byKey(periodCompleted, a => a.name).sort((a,b) => b.revenue - a.revenue).slice(0,5)
     .map(c => ({ label: c.key, sub: `${c.count} visit${c.count===1?'':'s'}`, valueLabel: `${currency}${c.revenue}` }));
-  const topServices = byKeyMulti(completed, a => serviceList(a)).sort((a,b) => b.count - a.count).slice(0,5)
+  const topServices = byKeyMulti(periodCompleted, a => serviceList(a)).sort((a,b) => b.count - a.count).slice(0,5)
     .map(sv => ({ label: sv.key || 'Other', sub: `${currency}${Math.round(sv.revenue)} total`, valueLabel: `${sv.count}×` }));
-  const paymentBreakdown = byKey(completed, a => a.paymentMethod).sort((a,b) => b.revenue - a.revenue)
+  const paymentBreakdown = byKey(periodCompleted, a => a.paymentMethod).sort((a,b) => b.revenue - a.revenue)
     .map(p => ({ label: p.key || 'Unrecorded', valueLabel: `${currency}${p.revenue}` }));
 
   const detailRec = s.detailId ? s.appointments.find(a => a.id === s.detailId) : null;
@@ -1499,8 +1523,11 @@ function computeVals(){
     todayList, upcomingList,
     inventoryList, hasInventory: inventoryList.length > 0, lowStockCount: lowStockItems.length, hasLowStock: lowStockItems.length > 0,
     searchResults, searchEmptyLabel: searchQ ? 'No matching clients found.' : 'Type a name or phone number to search.',
-    weekTotal, monthTotal, allTimeTotal, completedCount: completed.length, completedList,
-    revenueMonths, selectedRevenueMonth, hasRevenueMonths: revenueMonths.length > 0,
+    completedList, completedCount: periodCompleted.length,
+    periodFrom: s.earningsFrom, periodTo: s.earningsTo, periodLabel,
+    periodRevenue: Math.round(periodRevenue),
+    periodJobAvg: periodCompleted.length ? Math.round(periodRevenue / periodCompleted.length) : 0,
+    activePeriodPreset, periodPresetList,
     noShowList, hasNoShows: noShowList.length > 0,
     noShowsByClient, hasNoShowsByClient: noShowsByClient.length > 0,
     topClients, hasTopClients: topClients.length > 0,
@@ -1831,26 +1858,21 @@ function renderSearch(v){
 
 function renderEarnings(v){
   let html = `<div>
-    <div class="stat-row">
-      <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value">${esc(v.currency)}${v.weekTotal}</div></div>
-      <div class="stat-card"><div class="stat-label">This month</div><div class="stat-value">${esc(v.currency)}${v.monthTotal}</div></div>
+    <div class="period-presets">
+      ${v.periodPresetList.map(p => `<div class="period-chip ${v.activePeriodPreset === p.key ? 'period-chip--active' : ''}" data-action="setEarningsPeriod" data-value="${esc(p.key)}">${esc(p.label)}</div>`).join('')}
     </div>
-    <div class="stat-row">
-      <div class="stat-card"><div class="stat-label">All-time revenue</div><div class="stat-value">${esc(v.currency)}${v.allTimeTotal}</div></div>
-      <div class="stat-card"><div class="stat-label">Completed jobs</div><div class="stat-value">${v.completedCount}</div></div>
+    <div class="period-range">
+      <label class="period-range-field">From<input type="date" class="field" data-bind="earningsFrom" value="${esc(v.periodFrom)}"/></label>
+      <label class="period-range-field">To<input type="date" class="field" data-bind="earningsTo" value="${esc(v.periodTo)}"/></label>
+    </div>
+    <div class="period-summary">
+      <div class="period-summary-label">${esc(v.periodLabel)}</div>
+      <div class="period-summary-value">${esc(v.currency)}${v.periodRevenue}</div>
+      <div class="period-summary-sub">${v.completedCount} job${v.completedCount === 1 ? '' : 's'}${v.completedCount ? ` &middot; ${esc(v.currency)}${v.periodJobAvg} avg` : ''}</div>
     </div>`;
-  if (v.hasRevenueMonths) {
-    const sel = v.selectedRevenueMonth;
-    html += `<div class="section-title">Revenue by month</div>
-    <select class="field" data-bind="revenueMonth" style="margin-bottom:10px">
-      ${v.revenueMonths.map(r => `<option value="${esc(r.key)}" ${r.key === sel.key ? 'selected' : ''}>${esc(r.label)} — ${esc(v.currency)}${r.revenue}</option>`).join('')}
-    </select>
-    <div class="list-row"><div><div class="list-row-label">${esc(sel.label)}</div><div class="list-row-sub">${sel.count} job${sel.count === 1 ? '' : 's'} completed</div></div><div class="list-row-value">${esc(v.currency)}${sel.revenue}</div></div>
-    <div style="height:16px"></div>`;
-  }
-  // Everything below the headline numbers is collapsed by default -- Asha
-  // mostly opens History to check what she earned, and the full lists made
-  // the screen scroll for ages. Each header still shows the key count.
+  // Everything below the summary is collapsed by default -- Asha mostly opens
+  // History to check what she earned, and the full lists made the screen
+  // scroll for ages. Each header still shows the count for the period.
   let completedBody;
   if (v.completedList.length) {
     const visibleCompleted = v.completedList.slice(0, state.earningsCompletedVisible);

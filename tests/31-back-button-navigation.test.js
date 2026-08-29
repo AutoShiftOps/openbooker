@@ -30,16 +30,16 @@ const { bypassGate } = require('./lib/bypassGate');
   await page.waitForSelector('.next-up-card');
 
   const onHome = () => page.locator('.section-title', { hasText: 'Today' }).isVisible();
-  const onEarnings = () => page.locator('.stat-label', { hasText: 'This week' }).isVisible();
+  const onEarnings = () => page.locator('.period-summary-value').isVisible();
 
   // --- screen nav: home -> History -> Inventory, then Back, Back ---
   await page.click('[data-action="goEarnings"]');
-  await page.waitForSelector('.stat-value');
+  await page.waitForSelector('.period-summary-value');
   await page.click('[data-action="goInventory"]');
   await page.waitForSelector('#inv-name');
 
   await page.goBack();
-  await page.waitForSelector('.stat-value');
+  await page.waitForSelector('.period-summary-value');
   assert.ok(await onEarnings(), 'Back from Inventory should return to History');
 
   await page.goBack();
