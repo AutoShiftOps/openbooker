@@ -52,6 +52,10 @@ const { bypassGate } = require('./lib/bypassGate');
   const bannerText = await page.locator('.banner-warning', { hasText: /an outcome/ }).textContent();
   assert.ok(/2 past appointments/.test(bannerText), 'banner should count both stale past bookings: ' + bannerText);
 
+  // The header count reflects only genuinely-scheduled bookings, not the stale past ones
+  const headerSub = await page.locator('.header-subtitle').textContent();
+  assert.strictEqual(headerSub.trim(), '1 upcoming booking', 'header should not count stale past bookings: ' + headerSub);
+
   if (errors.length) throw new Error('Console/page errors detected: ' + JSON.stringify(errors));
   console.log('PASS: 30-past-appointments-not-future');
   await browser.close();

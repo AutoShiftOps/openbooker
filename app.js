@@ -1467,7 +1467,7 @@ function computeVals(){
 
   return {
     accent, currency,
-    headerSubtitle: s.screen === 'home' ? `${upcoming.length} upcoming booking${upcoming.length===1?'':'s'}` :
+    headerSubtitle: s.screen === 'home' ? (() => { const n = todayList.length + upcomingList.length; return `${n} upcoming booking${n===1?'':'s'}`; })() :
       s.screen === 'add' ? 'Add a new booking' : s.screen === 'search' ? 'Find a client' :
       s.screen === 'earnings' ? 'Completed jobs & earnings' : s.screen === 'settings' ? 'Settings' :
       s.screen === 'inventory' ? 'Inventory' : s.screen === 'calendar' ? 'Calendar' : 'Booking details',
