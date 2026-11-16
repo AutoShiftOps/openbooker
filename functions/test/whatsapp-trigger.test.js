@@ -101,3 +101,23 @@ test('API failure is logged, does not throw, and is not auto-retried', async () 
   await run.run(evt([appt({})], [DONE], [client(false)]));
   assert.equal(calls.length, 1, 'a failed send is not silently re-sent');
 });
+
+test('allowedNumbers (pilot mode): real clients are never messaged, only allow-listed numbers', async () => {
+  const calls = [];
+  setup({ cfg: { ...CFG, allowedNumbers: ['+1 416 555 9999'] }, calls });
+  await fn().run(evt([appt({})], [DONE], [client(true)]));          // client is 905-555-0142
+  assert.equal(calls.length, 0, 'non-listed client skipped');
+  const mine = appt({ id: 'a9', phone: '416-555-9999', status: 'done', price: '1', paymentMethod: 'Cash' });
+  await fn().run(evt([appt({ id: 'a9', phone: '416-555-9999' })], [mine], [client(false)]));
+  assert.equal(calls.length, 1, 'listed number is messaged');
+  assert.equal(calls[0].body.to, '14165559999');
+});
+
+test('dryRun: records the would-send, sends nothing', async () => {
+  const calls = [];
+  const db = setup({ cfg: { ...CFG, dryRun: true }, calls });
+  await fn().run(evt([appt({})], [DONE], [client(true)]));
+  assert.equal(calls.length, 0);
+  assert.equal(db.store.get('whatsappLog/u1__a1__thanks').status, 'dry-run');
+  assert.equal(db.store.get('whatsappLog/u1__client_9055550142__invite').status, 'dry-run');
+});

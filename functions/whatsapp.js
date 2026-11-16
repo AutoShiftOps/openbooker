@@ -16,7 +16,9 @@
      enabled: true,
      phoneNumberId: '1234567890',          // from Meta WhatsApp Manager
      channelUrl: 'https://whatsapp.com/channel/...',
-     currency: '$', defaultCountryCode: '1', lang: 'en'
+     currency: '$', defaultCountryCode: '1', lang: 'en',
+     dryRun: true,                       // optional: log only, send nothing
+     allowedNumbers: ['+1905...']        // optional: ONLY these numbers are messaged
    }
    The access token is a secret: `firebase functions:secrets:set WHATSAPP_TOKEN`. */
 
@@ -55,9 +57,20 @@ async function claim(db, key, meta) {
   }
 }
 
-async function deliver(db, key, meta, send) {
+async function deliver(db, key, meta, send, cfg) {
+  // Test mode: only allow-listed numbers are ever messaged.
+  if (!lib.isAllowed(meta.to, cfg)) {
+    console.log(`WhatsApp skipped (${key}): number not on allowedNumbers`);
+    return;
+  }
   const ref = await claim(db, key, meta);
   if (!ref) return;
+  // Dry run: record what WOULD be sent, send nothing. Re-running for real later
+  // needs the dry-run log docs deleted (they hold the idempotency key).
+  if (cfg && cfg.dryRun) {
+    await ref.update({ status: 'dry-run', dryRunAt: Date.now() });
+    return;
+  }
   try {
     const wamid = await send();
     await ref.update({ status: 'sent', wamid: wamid || null, sentAt: Date.now() });
@@ -101,7 +114,7 @@ exports.whatsappOnAppointmentCompleted = onDocumentUpdated(
           phoneNumberId: cfg.phoneNumberId, token, to, lang,
           template: lib.TEMPLATES.thanks,
           params: lib.thanksParams(appt, cfg)
-        })
+        }), cfg
       );
 
       // 2) Channel invite (marketing) -- consenting clients only, once ever.
@@ -114,7 +127,7 @@ exports.whatsappOnAppointmentCompleted = onDocumentUpdated(
             phoneNumberId: cfg.phoneNumberId, token, to, lang,
             template: lib.TEMPLATES.invite,
             params: lib.inviteParams(client, cfg)
-          })
+          }), cfg
         );
       }
     }

@@ -98,6 +98,14 @@ function shouldInvite(client, cfg, alreadyInvited) {
   return !!(client && client.consent === true && cfg && cfg.channelUrl && !alreadyInvited);
 }
 
+/* Test-mode gate. `allowedNumbers` (array of E.164) restricts sending to those
+   numbers only -- every other client is skipped, so a pilot on the live app can
+   never reach a real client. Absent/empty = no restriction (normal operation). */
+function isAllowed(to, cfg) {
+  const list = cfg && Array.isArray(cfg.allowedNumbers) ? cfg.allowedNumbers.map(n => toE164(n, (cfg && cfg.defaultCountryCode) || '1')).filter(Boolean) : [];
+  return list.length === 0 || list.includes(to);
+}
+
 // Meta "send template" request body.
 function templatePayload(to, templateName, params, lang = 'en') {
   return {
@@ -114,5 +122,5 @@ function templatePayload(to, templateName, params, lang = 'en') {
 
 module.exports = {
   TEMPLATES, toE164, digitsOf, findClient, newlyCompleted,
-  thanksParams, inviteParams, shouldInvite, templatePayload, firstName, serviceLabel
+  thanksParams, inviteParams, shouldInvite, isAllowed, templatePayload, firstName, serviceLabel
 };

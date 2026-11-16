@@ -64,6 +64,28 @@ numbers are not shown to the admin or to each other.
 7. **Test**: add a booking with your own phone, tick "OK getting offers", mark it completed with
    a price. You should get the receipt, then the Channel invite. Check `whatsappLog` in Firestore.
 
+## Testing safely on the live app
+Nothing sends until the function is deployed **and** `whatsappConfig/{uid}` has `enabled: true`.
+Deploying with no config doc is a no-op, so deploy first, enable later.
+
+1. **Dry run** -- set `enabled: true, dryRun: true`. Completing bookings sends nothing; each
+   *would-be* message is recorded in `whatsappLog` with `status: "dry-run"`. Use normal bookings
+   for a day and check the log looks right.
+2. **Pilot** -- set `dryRun: false` and `allowedNumbers: ["+1<your own number>"]`. Only that
+   number is ever messaged; real clients are skipped. Complete a test booking with your number.
+3. **Go live** -- delete `allowedNumbers` (and delete the dry-run docs in `whatsappLog`, they hold
+   the once-only keys). Clients are now messaged for real.
+
+## CI / deploy
+- `.github/workflows/ci.yml`: function tests + syntax check on every PR/branch.
+- `.github/workflows/deploy.yml`: after a merge to `master`, tests, then deploys functions,
+  Firestore rules and hosting to project `samakeovers-7326f`. It waits on the `production`
+  environment, so add yourself under Settings -> Environments -> production -> Required reviewers.
+- One-time: create a Google service account with Firebase Admin + Cloud Functions Admin +
+  Service Account User (+ Secret Manager Accessor for `WHATSAPP_TOKEN`), and save its JSON key
+  as the repo secret `FIREBASE_SERVICE_ACCOUNT`.
+- Deploy at a quiet time; the PWA refreshes on its next load.
+
 ## Cost
 Each automated message is billed per message by Meta (utility vs marketing rates differ, and
 some messages that used to be free became billable on Oct 1, 2026). Check the current
