@@ -489,6 +489,14 @@ function upsertClient(list, { name, phone, address }){
   return copy;
 }
 
+// The directory entry for an appointment -- same key rule as upsertClient.
+function findClientFor(list, a){
+  const digits = (a.phone || '').replace(/\D/g, '');
+  const key = digits || (a.name || '').toLowerCase().trim();
+  if (!key) return null;
+  return list.find(c => ((c.phone || '').replace(/\D/g, '') || (c.name || '').toLowerCase().trim()) === key) || null;
+}
+
 // Ensures every appointment is represented in the client directory. Run this
 // every time the appointment list changes shape from underneath the client
 // list (on load, and after a cloud merge) rather than relying on a one-time
@@ -1113,6 +1121,18 @@ const Actions = {
   pickSlotTime: (id, value) => setState(s => ({ form: { ...s.form, time: value } })),
   toggleClientConsent: (id) => {
     persistClients(state.clients.map(c => c.id === id ? { ...c, consent: !c.consent, updatedAt: Date.now() } : c));
+  },
+  // Same flag as the Clients screen's "Promo OK" box, but reachable at the
+  // moment it's natural to ask -- while checking the client out. Ticked BEFORE
+  // "Confirm", so the consent is already saved when the completion is synced
+  // (the WhatsApp Cloud Function reads it from the same doc).
+  toggleCompleteConsent: () => {
+    const a = state.appointments.find(x => x.id === state.completingId);
+    if (!a) return;
+    const list = upsertClient(state.clients, { name: a.name, phone: a.phone, address: a.address });
+    const c = findClientFor(list, a);
+    if (!c) return;
+    persistClients(list.map(x => x.id === c.id ? { ...x, consent: !x.consent, updatedAt: Date.now() } : x));
   },
   viewClientHistory: (id) => setState({ viewingClientId: id }),
   backFromClientHistory: () => setState({ viewingClientId: null }),
@@ -1997,6 +2017,10 @@ function renderDetail(v){
       <input id="pending-price" class="field" inputmode="decimal" style="margin-bottom:8px" data-bind="pendingPrice" value="${esc(state.pendingPrice)}" placeholder="Final price"/>
       <div class="payment-chip-row" style="margin-bottom:10px">
         ${PAYMENT_METHODS.map(m => `<div class="payment-chip ${state.pendingPaymentMethod===m?'payment-chip--active':''}" data-action="selectPayment" data-value="${esc(m)}">${esc(m)}</div>`).join('')}
+      </div>
+      <div class="checkbox-row" data-action="toggleCompleteConsent" style="margin-bottom:10px">
+        <div class="checkbox-box ${(findClientFor(state.clients, v.detail) || {}).consent ? 'checkbox-box--checked' : ''}"></div>
+        <div class="checkbox-label">Client is OK getting offers &amp; new arrivals on WhatsApp</div>
       </div>
       <div style="display:flex;gap:8px">
         <div class="action-btn-secondary" style="flex:1" data-action="cancelComplete">Cancel</div>

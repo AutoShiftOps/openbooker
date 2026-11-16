@@ -12,5 +12,13 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false;
     }
+    // WhatsApp settings are set by the operator (console/Admin SDK), never by
+    // the client. The owner may read their own so the app can show status.
+    // whatsappLog (sent/failed audit trail) has no rule at all = denied to
+    // every client; only the Cloud Function (Admin SDK) touches it.
+    match /whatsappConfig/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
   }
 }

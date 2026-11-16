@@ -12,6 +12,8 @@ admin.initializeApp();
 // Stripe billing functions live in their own file (stripe.js) -- required
 // after initializeApp() since they call admin.firestore() at request time.
 Object.assign(exports, require('./stripe'));
+// WhatsApp thank-you + Channel-invite automations (see WHATSAPP.md).
+Object.assign(exports, require('./whatsapp'));
 
 const REMINDER_MINUTES_BEFORE = 30;
 // Runs every 5 minutes; window is wider than the cron cadence so a slightly
