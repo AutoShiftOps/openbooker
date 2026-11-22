@@ -1,0 +1,119 @@
+# Tests on every pull request and push. Pull requests from this repo also get a
+# temporary Firebase Hosting preview link (7 days). A push to master deploys
+# Hosting + Firestore rules, and Cloud Functions only when functions/ changed
+# (or when run by hand with "deploy functions" ticked).
+#
+# One-time setup (see the PR description / README for details):
+#   1. Repo secret FIREBASE_SERVICE_ACCOUNT_SAMAKEOVERS_7326F = service account JSON key
+#      (`firebase init hosting:github` creates the account and this secret for you).
+#   2. GitHub environment "production" (Settings -> Environments) -- add yourself as a
+#      required reviewer if you want to approve each live deploy.
+name: CI / Deploy
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      deploy_functions:
+        description: Also deploy Cloud Functions
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a live deploy half-way; superseded PR runs can go.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FIREBASE_PROJECT: samakeovers-7326f
+  FIREBASE_TOOLS_VERSION: 15.37.0
+  NODE_VERSION: '22'
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - name: Syntax check
+        run: |
+          node --check app.js
+          node --check sw.js
+          node --check functions/index.js
+          node --check functions/stripe.js
+      - name: Install test dependencies
+        working-directory: tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run Playwright suite
+        working-directory: tests
+        run: npm test
+
+  preview:
+    name: Preview link
+    needs: test
+    # Forks don't get secrets, so only PRs from branches in this repo.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SAMAKEOVERS_7326F }}
+          projectId: ${{ env.FIREBASE_PROJECT }}
+          expires: 7d
+          firebaseToolsVersion: ${{ env.FIREBASE_TOOLS_VERSION }}
+
+  deploy:
+    name: Deploy to production
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://${{ env.FIREBASE_PROJECT }}.web.app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # paths-filter compares this push against the previous one
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: changes
+        with:
+          filters: |
+            functions:
+              - 'functions/**'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SAMAKEOVERS_7326F }}
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@${{ env.FIREBASE_TOOLS_VERSION }}
+      - name: Deploy Hosting + Firestore rules
+        run: firebase deploy --only hosting,firestore:rules --project "$FIREBASE_PROJECT" --non-interactive
+      - name: Deploy Cloud Functions
+        if: steps.changes.outputs.functions == 'true' || inputs.deploy_functions
+        run: |
+          (cd functions && npm ci)
+          firebase deploy --only functions --project "$FIREBASE_PROJECT" --non-interactive

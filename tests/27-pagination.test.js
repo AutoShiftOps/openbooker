@@ -22,12 +22,14 @@ const { bypassGate } = require('./lib/bypassGate');
 
   await page.addInitScript(() => {
     const appointments = [];
+    // Upcoming dates relative to today, so they stay in the future.
+    const ahead = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
     for (let i = 0; i < 20; i++) {
       const name = 'Person ' + i;
       const phone = '416555' + String(1000 + i);
       appointments.push({
         id: 'up' + i, name, phone, service: 'Consultation',
-        date: '2026-09-' + String(10 + (i % 15)).padStart(2, '0'), time: '10:00',
+        date: ahead(10 + (i % 15)), time: '10:00',
         address: '', price: '', notes: '', status: 'upcoming'
       });
       appointments.push({

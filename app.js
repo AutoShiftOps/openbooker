@@ -28,6 +28,15 @@ const DEFAULT_BUSINESS_PROFILE = {
   defaultAddress: '',
   logoDataUrl: '', // owner-uploaded logo, auto-cropped to a square PNG data URI; empty = text-only header
   timezone: 'America/Toronto', // overwritten with the browser's detected zone at onboarding time
+  // WhatsApp thank-you after a visit is marked completed (Settings -> Thank-you
+  // messages). The app can only PREFILL the message in WhatsApp -- the owner
+  // still taps Send; fully automatic sending would need the WhatsApp Business
+  // API behind a Cloud Function.
+  thanksEnabled: true,
+  thanksTemplate: '',    // '' = use DEFAULT_THANKS_TEMPLATE (so improving the default reaches everyone who never customized it)
+  thanksAskConsent: true, // add the offers opt-in question to the thank-you for a client who hasn't been asked yet
+  consentAskText: '',    // '' = use DEFAULT_CONSENT_ASK
+  reviewUrl: '',         // optional Google review link, filled into {review}
   onboarded: false,
   updatedAt: 0
 };
@@ -41,6 +50,9 @@ const VAPID_KEY = 'BEm07yLb3A4FD8a2RggNcZIA-SbuG8fZzDccgtxghLUXVfH6iBsioQPtui32G
 
 const DEFAULT_SERVICES = ['Consultation','Standard appointment','Other'];
 const PAYMENT_METHODS = ['Cash','Interac','Card','Other'];
+
+const DEFAULT_THANKS_TEMPLATE = 'Hi {name}, thank you for visiting {business} today! It was lovely having you.\n\n{review}';
+const DEFAULT_CONSENT_ASK = 'Would you like to get our offers and new arrivals on WhatsApp? Reply YES to join. You can reply STOP anytime.';
 const PAGE_SIZE = 15; // rows shown before a "Show more" button, on any list that can grow unbounded
 
 // Curated, not exhaustive -- a starting set covering North America plus a few
@@ -510,6 +522,62 @@ function isDateBlocked(blockedDates, dateStr){
   return blockedDates.find(b => b.date === dateStr) || null;
 }
 
+// ---- WhatsApp thank-you + offers consent (pure helpers) ----
+// wa.me needs the country code. A bare 10-digit number is treated as
+// Canada/US (+1); anything longer is assumed to already include one.
+function waNumber(phone){
+  const d = (phone || '').replace(/\D/g, '');
+  return d.length === 10 ? '1' + d : d;
+}
+function waLinkWithText(phone, text){
+  return `https://wa.me/${waNumber(phone)}?text=${encodeURIComponent(text)}`;
+}
+function firstName(name){
+  return (name || '').trim().split(/\s+/)[0] || 'there';
+}
+// Fills {name}, {business}, {service}, {review}. {review} becomes a full
+// sentence only when a review link is saved, otherwise it disappears cleanly.
+function fillMessage(template, appt, profile){
+  const review = profile.reviewUrl ? `If you enjoyed it, a quick Google review would mean a lot: ${profile.reviewUrl}` : '';
+  const svc = serviceLabel(appt);
+  return (template || '')
+    .replace(/\{name\}/g, firstName(appt.name))
+    .replace(/\{business\}/g, (profile.name || '').trim() || 'us')
+    .replace(/\{service\}/g, svc ? svc.toLowerCase() : 'appointment')
+    .replace(/\{review\}/g, review)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+function buildThanksMessage(appt, profile, includeConsentAsk){
+  let msg = fillMessage(profile.thanksTemplate || DEFAULT_THANKS_TEMPLATE, appt, profile);
+  if (includeConsentAsk) msg += '\n\nP.S. ' + (profile.consentAskText || DEFAULT_CONSENT_ASK);
+  return msg;
+}
+function buildConsentAskMessage(appt, profile){
+  const who = (profile.name || '').trim();
+  return `Hi ${firstName(appt.name)}${who ? `, this is ${who}` : ''}. ` + (profile.consentAskText || DEFAULT_CONSENT_ASK);
+}
+// Same identity rule as upsertClient(): digits-only phone, else lowercased name.
+function clientKey(rec){
+  return (rec.phone || '').replace(/\D/g, '') || (rec.name || '').toLowerCase().trim();
+}
+function findClientFor(clients, appt){
+  const key = clientKey(appt);
+  return key ? clients.find(c => clientKey(c) === key) || null : null;
+}
+// 'yes' | 'no' | 'asked' (asked, no answer recorded) | '' (never asked).
+// `consent` stays the single source of truth for "OK to send offers";
+// consentAnsweredAt tells a recorded "no" apart from "never asked".
+function consentStatus(client){
+  if (!client) return '';
+  if (client.consent) return 'yes';
+  if (client.consentAnsweredAt) return 'no';
+  return client.consentAskedAt ? 'asked' : '';
+}
+function fmtStamp(ms){
+  return ms ? new Date(ms).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '';
+}
+
 // ---- Icons ----
 const ICON_GEAR = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>';
 const ICON_CALENDAR = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
@@ -724,7 +792,9 @@ function pullFromCloud(uid){
       const blockedDates = mergeById(state.blockedDates, Array.isArray(d.blockedDates) ? d.blockedDates : []);
       // Not an array -- a single settings object, so "newer updatedAt wins"
       // rather than the record-list merge rule used above.
-      const businessProfile = mergeSingleton(state.businessProfile, d.businessProfile);
+      // Defaults underneath so a profile saved before a field existed (e.g. the
+      // thank-you settings) still has every key.
+      const businessProfile = { ...DEFAULT_BUSINESS_PROFILE, ...mergeSingleton(state.businessProfile, d.businessProfile) };
       state.appointments = appointments;
       state.inventory = inventory;
       state.services = services;
@@ -909,12 +979,37 @@ function mergeClientsAction(keepId, absorbId){
     ...keep,
     address: keep.address || absorb.address,
     consent: keep.consent || absorb.consent, // preserve an existing yes rather than risk losing it
+    consentAnsweredAt: Math.max(keep.consentAnsweredAt || 0, absorb.consentAnsweredAt || 0) || null,
+    consentAskedAt: Math.max(keep.consentAskedAt || 0, absorb.consentAskedAt || 0) || null,
     updatedAt: Date.now()
   };
   const updatedClients = clients.filter(c => c.id !== absorbId).map(c => c.id === keepId ? mergedClient : c);
 
   persist(updatedAppointments);
   persistClients(updatedClients);
+}
+
+// Opens WhatsApp with the thank-you prefilled for one appointment. Must run
+// inside the tap that triggered it, or the browser blocks the new window.
+// Returns true only if WhatsApp actually opened -- that's when the send is
+// recorded (the owner still has to press Send inside WhatsApp).
+function openThanksFor(apptId){
+  const a = state.appointments.find(x => x.id === apptId);
+  if (!a || !waNumber(a.phone)) return false;
+  const bp = state.businessProfile;
+  const client = findClientFor(state.clients, a);
+  const ask = bp.thanksAskConsent !== false && !!client && consentStatus(client) === '';
+  const win = window.open(waLinkWithText(a.phone, buildThanksMessage(a, bp, ask)), '_blank');
+  if (!win) return false;
+  const now = Date.now();
+  persist(state.appointments.map(x => x.id === apptId ? { ...x, thanksSentAt: now, updatedAt: now } : x));
+  if (ask) persistClients(state.clients.map(c => c.id === client.id ? { ...c, consentAskedAt: now, updatedAt: now } : c));
+  return true;
+}
+
+function setClientConsent(clientId, yes){
+  const now = Date.now();
+  persistClients(state.clients.map(c => c.id === clientId ? { ...c, consent: !!yes, consentAnsweredAt: now, updatedAt: now } : c));
 }
 
 function addInventoryItem(){
@@ -1112,8 +1207,37 @@ const Actions = {
   },
   pickSlotTime: (id, value) => setState(s => ({ form: { ...s.form, time: value } })),
   toggleClientConsent: (id) => {
-    persistClients(state.clients.map(c => c.id === id ? { ...c, consent: !c.consent, updatedAt: Date.now() } : c));
+    const c = state.clients.find(x => x.id === id);
+    if (c) setClientConsent(id, !c.consent);
   },
+  // Booking detail: thank-you + offers consent
+  sendThanks: () => {
+    const a = state.appointments.find(x => x.id === state.detailId);
+    if (!a || !waNumber(a.phone)) { showToast('Add a phone number first'); return; }
+    if (!openThanksFor(state.detailId)) showToast('WhatsApp didn’t open — check pop-up settings');
+  },
+  askConsent: () => {
+    const a = state.appointments.find(x => x.id === state.detailId);
+    const client = a && findClientFor(state.clients, a);
+    if (!a || !client || !waNumber(a.phone)) { showToast('Add a phone number first'); return; }
+    const win = window.open(waLinkWithText(a.phone, buildConsentAskMessage(a, state.businessProfile)), '_blank');
+    if (!win) { showToast('WhatsApp didn’t open — check pop-up settings'); return; }
+    const now = Date.now();
+    persistClients(state.clients.map(c => c.id === client.id ? { ...c, consentAskedAt: now, updatedAt: now } : c));
+    showToast('Question ready in WhatsApp — record her answer here');
+  },
+  consentYes: (id) => { setClientConsent(id, true); showToast('OK to send offers'); },
+  consentNo: (id) => { setClientConsent(id, false); showToast('Marked as no offers'); },
+  copyConsentList: () => {
+    const text = state.clients.filter(c => c.consent && c.phone).map(c => `${c.name || ''}\t${c.phone}`.trim()).join('\n');
+    if (!text) return;
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { showToast('Copying isn’t supported on this phone'); return; }
+    navigator.clipboard.writeText(text).then(() => showToast('Copied — paste into a WhatsApp broadcast list'), () => showToast('Could not copy'));
+  },
+  // Settings: thank-you messages
+  toggleThanksEnabled: () => persistBusinessProfile({ ...state.businessProfile, thanksEnabled: state.businessProfile.thanksEnabled === false }),
+  toggleThanksAskConsent: () => persistBusinessProfile({ ...state.businessProfile, thanksAskConsent: state.businessProfile.thanksAskConsent === false }),
+  resetThanksTemplate: () => persistBusinessProfile({ ...state.businessProfile, thanksTemplate: '', consentAskText: '' }),
   viewClientHistory: (id) => setState({ viewingClientId: id }),
   backFromClientHistory: () => setState({ viewingClientId: null }),
 
@@ -1166,8 +1290,15 @@ const Actions = {
     if (!isValidPrice(pendingPrice)) { showToast('Price should be a plain number, e.g. 250'); return; }
     const list = state.appointments.map(a => a.id === completingId ? { ...a, status: 'done', price: pendingPrice, paymentMethod: pendingPaymentMethod, updatedAt: Date.now() } : a);
     persist(list);
+    let toast = 'Marked as completed';
+    if (state.businessProfile.thanksEnabled !== false) {
+      const appt = list.find(a => a.id === completingId);
+      if (!appt || !waNumber(appt.phone)) toast = 'Completed — no phone number, so no thank-you';
+      else if (openThanksFor(completingId)) toast = 'Completed — thank-you is ready in WhatsApp, tap Send';
+      else toast = 'Completed — WhatsApp didn’t open; use “Send thank-you” below';
+    }
     setState({ completingId: null, pendingPrice: '', pendingPaymentMethod: '' });
-    showToast('Marked as completed');
+    showToast(toast);
   },
 
   openReschedule: () => {
@@ -1435,6 +1566,26 @@ function computeVals(){
     history: (detailRec.history || []).map(h => ({ dateLabel: fmtDateLabel(h.date), timeLabel: fmtTimeLabel(h.time) }))
   } : {};
 
+  // Thank-you + offers consent for the open booking
+  const detailClient = detailRec ? findClientFor(s.clients, detailRec) : null;
+  const detailConsent = consentStatus(detailClient);
+  const CONSENT_LABELS = { yes: 'OK to send offers', no: 'Said no to offers', asked: 'Asked — no answer yet', '': 'Not asked yet' };
+  const thanksInfo = detailRec ? {
+    show: detailRec.status === 'done',
+    sentLabel: detailRec.thanksSentAt ? `Opened in WhatsApp on ${fmtStamp(detailRec.thanksSentAt)}` : 'Not sent yet',
+    buttonLabel: detailRec.thanksSentAt ? 'Send again' : 'Send thank-you',
+    canSend: !!waNumber(detailRec.phone)
+  } : null;
+  const consentInfo = detailClient ? {
+    clientId: detailClient.id,
+    status: detailConsent,
+    label: CONSENT_LABELS[detailConsent] + (detailConsent === 'yes' || detailConsent === 'no' ? ` · ${fmtStamp(detailClient.consentAnsweredAt)}` : detailConsent === 'asked' ? ` · ${fmtStamp(detailClient.consentAskedAt)}` : ''),
+    canAsk: !!waNumber(detailRec.phone) && detailConsent !== 'yes' && detailConsent !== 'no'
+  } : null;
+  const consentCount = s.clients.filter(c => c.consent && c.phone).length;
+  const bpMsg = s.businessProfile;
+  const thanksPreview = buildThanksMessage({ name: 'Priya Sharma', services: [] }, bpMsg, bpMsg.thanksAskConsent !== false);
+
   const formOverlapWarning = checkOverlap(s.appointments, s.form.date, s.form.time, null);
   const daySchedule = getDaySchedule(s.appointments, s.form.date);
 
@@ -1544,7 +1695,8 @@ function computeVals(){
     recentClients, hasRecentClients: recentClients.length > 0,
     nameMatches, hasNameMatches: nameMatches.length > 0,
     viewingClient, viewingClientAppointments,
-    allClients, hasClients: allClients.length > 0
+    allClients, hasClients: allClients.length > 0,
+    thanksInfo, consentInfo, consentCount, thanksPreview
   };
 }
 
@@ -1787,6 +1939,9 @@ function renderSearch(v){
     }
     html += `<div class="section-title" style="margin-top:4px">All clients</div>
     <div class="hint-text">Tap a client to see their booking history. The checkbox marks them OK to contact for promotions.</div>`;
+    if (v.consentCount) {
+      html += `<div class="action-btn-secondary" style="margin-bottom:10px" data-action="copyConsentList">Copy ${v.consentCount} opted-in number${v.consentCount===1?'':'s'}</div>`;
+    }
 
     if (s.addingClient) {
       html += `<div class="inline-panel">
@@ -1953,6 +2108,29 @@ function renderDetail(v){
       <div class="history-list">
         ${d.history.map(h => `<div class="history-strike">${esc(h.dateLabel)} at ${esc(h.timeLabel)}</div>`).join('')}
         <div class="history-now">Now: ${esc(d.dateLabel)} at ${esc(d.timeLabel)}</div>
+      </div>
+    </div>`;
+  }
+  if (v.thanksInfo && v.thanksInfo.show) {
+    html += `<div class="history-card" id="thanks-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div>
+          <div class="history-title" style="margin-bottom:3px">Thank-you message</div>
+          <div class="hint-text" style="margin-bottom:0">${esc(v.thanksInfo.sentLabel)}</div>
+        </div>
+        ${v.thanksInfo.canSend ? `<div class="link-btn link-btn--whatsapp" style="flex:0 0 auto;padding:9px 12px;cursor:pointer" data-action="sendThanks">${esc(v.thanksInfo.buttonLabel)}</div>` : '<div class="hint-text" style="margin-bottom:0">No phone number</div>'}
+      </div>
+    </div>`;
+  }
+  if (v.consentInfo) {
+    const ci = v.consentInfo;
+    html += `<div class="history-card" id="consent-card">
+      <div class="history-title" style="margin-bottom:3px">Offers on WhatsApp</div>
+      <div class="hint-text">${esc(ci.label)}</div>
+      <div class="payment-chip-row">
+        <div class="payment-chip ${ci.status==='yes'?'payment-chip--active':''}" data-action="consentYes" data-id="${esc(ci.clientId)}">She said yes</div>
+        <div class="payment-chip ${ci.status==='no'?'payment-chip--active':''}" data-action="consentNo" data-id="${esc(ci.clientId)}">She said no</div>
+        ${ci.canAsk ? `<div class="payment-chip" style="background:#e9f8ef;border-color:#bfe8cf;color:#256b3f" data-action="askConsent">Ask on WhatsApp</div>` : ''}
       </div>
     </div>`;
   }
@@ -2135,6 +2313,26 @@ function renderSettings(v){
     <input id="new-service-name" class="field" data-bind="newServiceName" value="${esc(s.newServiceName)}" placeholder="New service name"/>
     <div class="action-btn-secondary" style="flex:0 0 auto;padding:11px 16px" data-action="onAddService">Add</div>
   </div>`;
+
+  const thanksOn = bp.thanksEnabled !== false, askOn = bp.thanksAskConsent !== false;
+  html += `<div class="section-title">Thank-you messages</div>
+  <div class="hint-text">When you mark a visit completed, WhatsApp opens with a thank-you already written — you just tap Send.</div>
+  <div class="checkbox-row" style="margin-top:0;margin-bottom:8px" data-action="toggleThanksEnabled">
+    <div class="checkbox-box ${thanksOn?'checkbox-box--checked':''}"></div>
+    <div class="checkbox-label">Open a thank-you when I complete a visit</div>
+  </div>
+  <div class="checkbox-row" style="margin-top:0;margin-bottom:10px" data-action="toggleThanksAskConsent">
+    <div class="checkbox-box ${askOn?'checkbox-box--checked':''}"></div>
+    <div class="checkbox-label">Also ask about offers, if the client hasn't been asked yet</div>
+  </div>
+  <div class="hint-text" style="margin-bottom:4px">Message — {name}, {business}, {service} and {review} fill in by themselves</div>
+  <textarea id="thanks-template" class="field textarea-small" style="min-height:90px;margin-bottom:8px" data-bind="businessProfile.thanksTemplate">${esc(bp.thanksTemplate || DEFAULT_THANKS_TEMPLATE)}</textarea>
+  <div class="hint-text" style="margin-bottom:4px">Offers question</div>
+  <textarea id="consent-ask-text" class="field textarea-small" style="min-height:76px;margin-bottom:8px" data-bind="businessProfile.consentAskText">${esc(bp.consentAskText || DEFAULT_CONSENT_ASK)}</textarea>
+  <input id="review-url" class="field" style="margin-bottom:6px" data-bind="businessProfile.reviewUrl" value="${esc(bp.reviewUrl)}" placeholder="Google review link (optional, fills {review})"/>
+  <div class="edit-link" style="margin-bottom:10px" data-action="resetThanksTemplate">Reset messages to default</div>
+  <div class="history-title" style="margin-bottom:4px">Preview</div>
+  <div class="info-box" id="thanks-preview" style="white-space:pre-line;background:#e9f8ef;color:#1f4d30">${esc(v.thanksPreview)}</div>`;
 
   html += `<div class="section-title">Automatic reminders</div>
   <div class="hint-text">Get a phone notification 30 minutes before each upcoming appointment — sent from the cloud, so it works even if the app isn't open.</div>`;
