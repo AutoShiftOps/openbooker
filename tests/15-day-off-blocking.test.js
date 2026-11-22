@@ -22,17 +22,15 @@ const { bypassGate } = require('./lib/bypassGate');
   await page.click('[data-action="goCalendar"]');
   await page.waitForSelector('.calendar-grid');
 
-  const monthLabel = await page.locator('.section-title').first().textContent();
-  if (!monthLabel.includes('August 2026')) {
-    for (let i = 0; i < 24; i++) {
-      const lbl = await page.locator('.section-title').first().textContent();
-      if (lbl.includes('August 2026')) break;
-      await page.click('[data-action="calendarNextMonth"]');
-      await page.waitForTimeout(50);
-    }
+  // A day ~2 months ahead, so this test never goes stale as the calendar moves on.
+  const target = new Date(); target.setDate(1); target.setMonth(target.getMonth() + 2); target.setDate(15);
+  const TARGET = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-15`;
+  for (let i = 0; i < 24 && !(await page.locator(`.calendar-cell[data-value="${TARGET}"]`).count()); i++) {
+    await page.click('[data-action="calendarNextMonth"]');
+    await page.waitForTimeout(50);
   }
 
-  await page.click('.calendar-cell[data-value="2026-08-15"]');
+  await page.click(`.calendar-cell[data-value="${TARGET}"]`);
   await page.waitForSelector('[data-action="toggleDayOff"]');
   let toggleText = await page.locator('[data-action="toggleDayOff"]').textContent();
   assert.ok(/mark as a day off/i.test(toggleText), 'expected "Mark as a day off" initially');
@@ -55,7 +53,7 @@ const { bypassGate } = require('./lib/bypassGate');
   await page.click('[data-action="goAdd"]');
   await page.fill('#field-name', 'Exception Client');
   await page.fill('#field-phone', '4165551111');
-  await page.fill('#field-date', '2026-08-15');
+  await page.fill('#field-date', TARGET);
   await page.fill('#field-time', '13:00');
   await page.waitForSelector('.banner-warning');
   const addWarning = await page.locator('.banner-warning').textContent();
@@ -67,8 +65,8 @@ const { bypassGate } = require('./lib/bypassGate');
 
   // Unmark the day -> availability list should come back, blocked marker gone.
   await page.click('[data-action="goCalendar"]');
-  await page.waitForSelector('.calendar-cell[data-value="2026-08-15"]');
-  await page.click('.calendar-cell[data-value="2026-08-15"]');
+  await page.waitForSelector(`.calendar-cell[data-value="${TARGET}"]`);
+  await page.click(`.calendar-cell[data-value="${TARGET}"]`);
   await page.click('[data-action="toggleDayOff"]');
   await page.waitForTimeout(200);
   assert.strictEqual(await page.locator('.calendar-cell--blocked').count(), 0, 'blocked marker should be gone after unmarking');
