@@ -349,3 +349,25 @@ html, body { margin: 0; background: #e8e7f2; }
   background: #2a2650; color: #fff; font-size: 12.5px; font-weight: 600; padding: 10px 18px;
   border-radius: 20px; animation: toastIn 0.25s ease-out; white-space: nowrap; z-index: 5;
 }
+
+/* ---- Client database ---- */
+.stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 4px 0 10px; }
+.stat-grid .stat-card { padding: 12px; }
+.stat-grid .stat-value { font-size: 18px; }
+.client-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; background: #f1f0fa; color: #5e5a8c; vertical-align: middle; margin-left: 4px; }
+.client-badge--yes { background: #e9f8ef; color: #256b3f; }
+.visit-card { cursor: pointer; }
+.visit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.visit-items { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.visit-item { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: #453f78; }
+.visit-item--total { font-weight: 700; color: #2c2a52; border-top: 1px dashed #dcd9ee; padding-top: 3px; margin-top: 2px; }
+.match-card { background: #fff8e6; border: 1px solid #f1dca6; border-radius: 14px; padding: 12px; margin: 2px 0 4px; }
+.match-card--ok { background: #e9f8ef; border-color: #bfe8cf; color: #256b3f; font-size: 12.5px; font-weight: 600; }
+.match-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(0,0,0,0.06); }
+.match-row:first-of-type { border-top: 0; }
+.match-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.item-price-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.item-price-label { flex: 1; font-size: 13px; font-weight: 600; color: #2c2a52; }
+.item-price-row .field { flex: 0 0 110px; margin: 0; }
+.item-price-total { text-align: right; font-weight: 700; color: #2c2a52; font-size: 13.5px; margin: 2px 0 10px; }
+.service-row .service-price { flex: 0 0 96px; }

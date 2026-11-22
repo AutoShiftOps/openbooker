@@ -487,17 +487,17 @@ function clientLabel(name, phone){
 // name for the rare no-phone entry. Never touches an existing `consent` flag.
 function upsertClient(list, { name, phone, address }){
   if (!name && !phone) return list;
-  const digits = (phone || '').replace(/\D/g, '');
-  const key = digits || (name || '').toLowerCase().trim();
+  const key = clientKey({ name, phone });
   if (!key) return list;
-  const keyOf = c => (c.phone || '').replace(/\D/g, '') || (c.name || '').toLowerCase().trim();
-  const idx = list.findIndex(c => keyOf(c) === key);
+  const idx = list.findIndex(c => clientKey(c) === key);
   const now = Date.now();
   if (idx === -1) {
     return [...list, { id: uid('c'), name: name || '', phone: phone || '', address: address || '', consent: false, updatedAt: now }];
   }
   const copy = list.slice();
-  copy[idx] = { ...copy[idx], name: name || copy[idx].name, phone: phone || copy[idx].phone, address: address || copy[idx].address, updatedAt: now };
+  // Matched by phone: keep the saved name (someone may book for a family
+  // member on their own number); only fill it in if it was blank.
+  copy[idx] = { ...copy[idx], name: copy[idx].name || name || '', phone: phone || copy[idx].phone, address: address || copy[idx].address, updatedAt: now };
   return copy;
 }
 
@@ -557,9 +557,121 @@ function buildConsentAskMessage(appt, profile){
   const who = (profile.name || '').trim();
   return `Hi ${firstName(appt.name)}${who ? `, this is ${who}` : ''}. ` + (profile.consentAskText || DEFAULT_CONSENT_ASK);
 }
-// Same identity rule as upsertClient(): digits-only phone, else lowercased name.
+// ---- Per-service amounts ----
+// A visit can carry `items: [{service, price}]` (one price per service).
+// `price` stays the visit total, so every existing total/analytics keeps
+// working. Older visits have no items: a single-service visit is its own
+// item; a multi-service one only has a total (item prices unknown -> null).
+function visitItems(a){
+  if (Array.isArray(a.items) && a.items.length) return a.items.map(it => ({ service: it.service, price: it.price === '' || it.price == null ? null : +it.price }));
+  const svcs = serviceList(a);
+  if (svcs.length === 1) return [{ service: svcs[0], price: a.price !== '' && a.price != null ? +a.price : null }];
+  return svcs.map(sv => ({ service: sv, price: null }));
+}
+// Revenue per service across visits: exact where item prices are known,
+// otherwise the visit total split evenly (same rule the History screen used).
+function serviceTotals(visits){
+  const m = new Map();
+  visits.forEach(a => {
+    const items = visitItems(a);
+    if (!items.length) return;
+    const known = items.every(it => it.price != null);
+    items.forEach(it => {
+      const e = m.get(it.service) || { key: it.service, count: 0, revenue: 0 };
+      e.count++;
+      e.revenue += known ? it.price : (+a.price || 0) / items.length;
+      m.set(it.service, e);
+    });
+  });
+  return [...m.values()];
+}
+function defaultServicePrice(services, name){
+  const sv = services.find(x => x.name === name);
+  return sv && sv.price !== '' && sv.price != null ? String(sv.price) : '';
+}
+
+// ---- Client identity ----
+// One person = one phone number. Digits only, and an 11-digit North American
+// number's leading 1 is dropped, so "+1 (416) 555-0199" and "416-555-0199"
+// are the same client. No phone -> fall back to the normalized name.
+function phoneKey(phone){
+  const d = (phone || '').replace(/\D/g, '');
+  return d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+}
+function normName(name){
+  return (name || '').toLowerCase().replace(/[^a-z0-9\u00c0-\uffff ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
 function clientKey(rec){
-  return (rec.phone || '').replace(/\D/g, '') || (rec.name || '').toLowerCase().trim();
+  return phoneKey(rec.phone) || normName(rec.name);
+}
+function levenshtein(a, b){
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+// "Could these two names be the same person?" -- used for suggestions only,
+// never for automatic merging. Catches typos (Priya/Pirya), a dropped or
+// shortened surname (Priya / Priya S / Priya Sharma) and spacing/case/punctuation.
+function namesLookAlike(a, b){
+  const x = normName(a), y = normName(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const tx = x.split(' '), ty = y.split(' ');
+  if (tx[0] === ty[0] && tx[0].length >= 3) {
+    if (tx.length === 1 || ty.length === 1) return true;            // "Priya" vs "Priya Sharma"
+    if (tx[1][0] === ty[1][0]) return true;                         // "Priya S" vs "Priya Sharma"
+  }
+  const longest = Math.max(x.length, y.length), limit = longest >= 10 ? 2 : 1;
+  if (longest < 5 || Math.abs(x.length - y.length) > limit) return false; // edit distance can't be smaller than the length gap
+  return levenshtein(x, y) <= limit;
+}
+
+// Collapses client records that share a phone number into one. Runs on every
+// load and after every cloud merge: each device used to mint its own random id
+// for the same person, and the id-based cloud merge kept both. Deterministic
+// (the smallest id survives, newest non-empty details win) so every device
+// converges on the same record. Never touches appointments, and never merges
+// phone-less records -- those only show up as "possible duplicates".
+function dedupeClients(clients){
+  const groups = new Map();
+  const out = [];
+  clients.forEach(c => {
+    const k = phoneKey(c.phone);
+    if (!k) { out.push(c); return; }
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  });
+  let changed = false;
+  groups.forEach(group => {
+    if (group.length === 1) { out.push(group[0]); return; }
+    changed = true;
+    const byId = group.slice().sort((a,b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const byNewest = group.slice().sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const pick = f => (byNewest.find(c => c[f]) || {})[f] || '';
+    const answered = group.filter(c => c.consentAnsweredAt).sort((a,b) => b.consentAnsweredAt - a.consentAnsweredAt)[0];
+    const maxOf = f => Math.max(0, ...group.map(c => c[f] || 0));
+    const notSame = [...new Set(group.flatMap(c => c.notSameAs || []))].filter(id => !group.some(g => g.id === id));
+    const merged = {
+      ...byId[0],
+      name: pick('name'), phone: pick('phone'), address: pick('address'),
+      consent: answered ? !!answered.consent : group.some(c => c.consent),
+      updatedAt: maxOf('updatedAt')
+    };
+    if (maxOf('consentAnsweredAt')) merged.consentAnsweredAt = maxOf('consentAnsweredAt');
+    if (maxOf('consentAskedAt')) merged.consentAskedAt = maxOf('consentAskedAt');
+    if (notSame.length) merged.notSameAs = notSame; else delete merged.notSameAs;
+    out.push(merged);
+  });
+  return changed ? out : clients;
 }
 function findClientFor(clients, appt){
   const key = clientKey(appt);
@@ -652,7 +764,16 @@ const state = {
   needsAttentionVisible: 3,
   homeUpcomingVisible: PAGE_SIZE,
   earningsCompletedVisible: PAGE_SIZE,
-  clientsVisible: PAGE_SIZE
+  clientsVisible: PAGE_SIZE,
+  // Client database
+  clientSort: 'az',          // 'az' | 'recent' | 'spend'
+  dupDismissed: '',          // "No, new client" on the Add screen, for this name|phone
+  addClientChecked: false,   // Add-client form: look-alikes shown, waiting for her choice
+  showDuplicates: false,
+  editingClientId: null,
+  editClientForm: { name: '', phone: '', address: '' },
+  // Completion panel: one price per service when a visit has several
+  pendingItems: []
 };
 
 let auth = null, db = null, fns = null, toastTimer = null;
@@ -690,7 +811,7 @@ function loadPersisted(){
     // Always reconcile against local appointment history (not just on first
     // run) -- see reconcileClientsFromAppointments() for why a one-time-only
     // backfill isn't reliable for a cloud-synced client.
-    state.clients = reconcileClientsFromAppointments(existing, state.appointments);
+    state.clients = dedupeClients(reconcileClientsFromAppointments(existing, state.appointments));
     localStorage.setItem(LS_KEYS.clients, JSON.stringify(state.clients));
   } catch(e) { state.clients = []; }
   try {
@@ -788,7 +909,7 @@ function pullFromCloud(uid){
       // the now-fuller appointment list -- catches anyone missed by an earlier
       // backfill that ran before this device had the full history synced in.
       const mergedClients = mergeById(state.clients, Array.isArray(d.clients) ? d.clients : []);
-      const clients = reconcileClientsFromAppointments(mergedClients, appointments);
+      const clients = dedupeClients(reconcileClientsFromAppointments(mergedClients, appointments));
       const blockedDates = mergeById(state.blockedDates, Array.isArray(d.blockedDates) ? d.blockedDates : []);
       // Not an array -- a single settings object, so "newer updatedAt wins"
       // rather than the record-list merge rule used above.
@@ -966,9 +1087,8 @@ function mergeClientsAction(keepId, absorbId){
   const absorb = clients.find(c => c.id === absorbId);
   if (!keep || !absorb || keep.id === absorb.id) return;
 
-  const keyOf = c => (c.phone || '').replace(/\D/g, '') || (c.name || '').toLowerCase().trim();
-  const absorbKey = keyOf(absorb);
-  const apptKeyOf = a => (a.phone || '').replace(/\D/g, '') || (a.name || '').toLowerCase().trim();
+  const absorbKey = clientKey(absorb);
+  const apptKeyOf = clientKey;
 
   const updatedAppointments = state.appointments.map(a => {
     if (apptKeyOf(a) !== absorbKey) return a;
@@ -977,10 +1097,13 @@ function mergeClientsAction(keepId, absorbId){
 
   const mergedClient = {
     ...keep,
+    name: keep.name || absorb.name,
+    phone: keep.phone || absorb.phone,
     address: keep.address || absorb.address,
     consent: keep.consent || absorb.consent, // preserve an existing yes rather than risk losing it
     consentAnsweredAt: Math.max(keep.consentAnsweredAt || 0, absorb.consentAnsweredAt || 0) || null,
     consentAskedAt: Math.max(keep.consentAskedAt || 0, absorb.consentAskedAt || 0) || null,
+    notSameAs: [...new Set([...(keep.notSameAs || []), ...(absorb.notSameAs || [])])].filter(x => x !== keep.id && x !== absorb.id),
     updatedAt: Date.now()
   };
   const updatedClients = clients.filter(c => c.id !== absorbId).map(c => c.id === keepId ? mergedClient : c);
@@ -1005,6 +1128,26 @@ function openThanksFor(apptId){
   persist(state.appointments.map(x => x.id === apptId ? { ...x, thanksSentAt: now, updatedAt: now } : x));
   if (ask) persistClients(state.clients.map(c => c.id === client.id ? { ...c, consentAskedAt: now, updatedAt: now } : c));
   return true;
+}
+
+// Saves the client edit panel. Their bookings are found by the client key
+// (phone, or name when there's no phone), so bookings under the old key
+// follow the edit: the phone always, the name only when the name WAS the key.
+function saveClientEdit(){
+  const id = state.editingClientId;
+  const c = state.clients.find(x => x.id === id);
+  const f = state.editClientForm;
+  if (!c) return;
+  if (!f.name && !f.phone) { showToast('Enter a name or phone number'); return; }
+  const oldKey = clientKey(c), nameWasKey = !phoneKey(c.phone);
+  const clash = phoneKey(f.phone) && state.clients.find(x => x.id !== id && phoneKey(x.phone) === phoneKey(f.phone));
+  if (clash) { showToast(`That number belongs to ${clash.name || 'another client'} — use Merge instead`); return; }
+  const now = Date.now();
+  persist(state.appointments.map(a => clientKey(a) !== oldKey ? a :
+    { ...a, phone: f.phone, name: nameWasKey ? f.name : a.name, updatedAt: now }));
+  persistClients(state.clients.map(x => x.id === id ? { ...x, name: f.name, phone: f.phone, address: f.address, updatedAt: now } : x));
+  setState({ editingClientId: null });
+  showToast('Client updated');
 }
 
 function setClientConsent(clientId, yes){
@@ -1068,7 +1211,7 @@ function importBackupFile(file){
       persist(data.appointments);
       if (Array.isArray(data.inventory)) persistInventory(data.inventory);
       if (Array.isArray(data.services)) persistServices(data.services);
-      if (Array.isArray(data.clients)) persistClients(data.clients);
+      if (Array.isArray(data.clients)) persistClients(dedupeClients(reconcileClientsFromAppointments(data.clients, data.appointments)));
       setState({ backupStatus: `Restored ${data.appointments.length} appointment(s), ${(data.inventory||[]).length} stock item(s), ${(data.clients||[]).length} client(s).` });
     } catch(e) { setState({ backupStatus: 'That file could not be read as a backup.' }); }
   };
@@ -1239,17 +1382,68 @@ const Actions = {
   toggleThanksAskConsent: () => persistBusinessProfile({ ...state.businessProfile, thanksAskConsent: state.businessProfile.thanksAskConsent === false }),
   resetThanksTemplate: () => persistBusinessProfile({ ...state.businessProfile, thanksTemplate: '', consentAskText: '' }),
   viewClientHistory: (id) => setState({ viewingClientId: id }),
-  backFromClientHistory: () => setState({ viewingClientId: null }),
+  backFromClientHistory: () => setState({ viewingClientId: null, editingClientId: null }),
 
-  openAddClient: () => setState({ addingClient: true, newClientForm: { name: '', phone: '', address: '' } }),
-  cancelAddClient: () => setState({ addingClient: false }),
+  openAddClient: () => setState({ addingClient: true, addClientChecked: false, newClientForm: { name: '', phone: '', address: '' } }),
+  cancelAddClient: () => setState({ addingClient: false, addClientChecked: false }),
   confirmAddClient: () => {
     const f = state.newClientForm;
     if (!f.name && !f.phone) { showToast('Enter a name or phone number'); return; }
+    // First tap: if anyone looks like this person, show them and let her choose.
+    if (!state.addClientChecked) {
+      setState({ addClientChecked: true });
+      if (computeVals().addClientDupes.length) return;
+    }
+    Actions.confirmAddClientAnyway();
+  },
+  confirmAddClientAnyway: () => {
+    const f = state.newClientForm;
+    const exact = phoneKey(f.phone) && state.clients.find(c => phoneKey(c.phone) === phoneKey(f.phone));
+    if (exact) { showToast(`That number is already saved for ${exact.name || 'a client'}`); setState({ addingClient: false, addClientChecked: false, viewingClientId: exact.id }); return; }
     persistClients([...state.clients, { id: uid('c'), name: f.name, phone: f.phone, address: f.address, consent: false, updatedAt: Date.now() }]);
-    setState({ addingClient: false });
+    setState({ addingClient: false, addClientChecked: false });
     showToast('Client added');
   },
+  // Client database: sorting, duplicates, editing, booking
+  setClientSort: (id, value) => setState({ clientSort: value, clientsVisible: PAGE_SIZE }),
+  toggleDuplicates: () => setState(s => ({ showDuplicates: !s.showDuplicates })),
+  mergePair: (id) => {
+    let [keepId, absorbId] = String(id).split('|');
+    // Keep the record with a phone number: bookings are linked by phone, so
+    // keeping a phone-less one would orphan them.
+    const k = state.clients.find(c => c.id === keepId), a = state.clients.find(c => c.id === absorbId);
+    if (k && a && !phoneKey(k.phone) && phoneKey(a.phone)) [keepId, absorbId] = [absorbId, keepId];
+    mergeClientsAction(keepId, absorbId);
+    showToast('Clients merged');
+  },
+  notSamePair: (id) => {
+    const [a, b] = String(id).split('|');
+    const now = Date.now();
+    persistClients(state.clients.map(c =>
+      c.id === a ? { ...c, notSameAs: [...new Set([...(c.notSameAs || []), b])], updatedAt: now } :
+      c.id === b ? { ...c, notSameAs: [...new Set([...(c.notSameAs || []), a])], updatedAt: now } : c));
+    showToast('Got it — kept as two different clients');
+  },
+  openEditClient: (id) => {
+    const c = state.clients.find(x => x.id === id);
+    if (c) setState({ editingClientId: id, editClientForm: { name: c.name || '', phone: c.phone || '', address: c.address || '' } });
+  },
+  cancelEditClient: () => setState({ editingClientId: null }),
+  saveEditClient: () => saveClientEdit(),
+  bookForClient: (id) => {
+    const c = state.clients.find(x => x.id === id);
+    if (!c) return;
+    setState({ screen: 'add', addTab: 'manual', viewingClientId: null,
+      form: { ...emptyForm(), date: '', time: '', name: c.name || '', phone: c.phone || '', address: c.address || state.businessProfile.defaultAddress } });
+  },
+  // Add screen: "Is this the same client?"
+  useExistingClient: (id) => {
+    const c = state.clients.find(x => x.id === id);
+    if (!c) return;
+    setState(s => ({ form: { ...s.form, name: c.name || s.form.name, phone: c.phone || s.form.phone, address: c.address || s.form.address } }));
+    showToast(`Booking for ${c.name || c.phone}`);
+  },
+  dismissDupe: () => setState(s => ({ dupDismissed: `${normName(s.form.name)}|${phoneKey(s.form.phone)}` })),
 
   startMergeClient: (id) => setState({ mergingClientId: id, mergeTargetId: null }),
   cancelMerge: () => setState({ mergingClientId: null, mergeTargetId: null }),
@@ -1281,14 +1475,36 @@ const Actions = {
   openComplete: () => {
     const id = state.detailId;
     const a = state.appointments.find(x => x.id === id);
-    setState({ completingId: id, pendingPrice: (a && a.price) || '', pendingPaymentMethod: (a && a.paymentMethod) || '' });
+    const svcs = a ? serviceList(a) : [];
+    // Several services: one price box each, pre-filled from earlier item
+    // prices or the service's default price in Settings.
+    const pendingItems = svcs.length > 1 ? svcs.map(sv => {
+      const prior = Array.isArray(a.items) ? a.items.find(it => it.service === sv) : null;
+      return { service: sv, price: prior && prior.price != null && prior.price !== '' ? String(prior.price) : defaultServicePrice(state.services, sv) };
+    }) : [];
+    const single = svcs.length === 1 ? defaultServicePrice(state.services, svcs[0]) : '';
+    setState({ completingId: id, pendingItems, pendingPrice: (a && a.price) || single || '', pendingPaymentMethod: (a && a.paymentMethod) || '' });
   },
   cancelComplete: () => setState({ completingId: null }),
   confirmComplete: () => {
-    const { completingId, pendingPrice, pendingPaymentMethod } = state;
+    const { completingId, pendingPaymentMethod, pendingItems } = state;
+    let pendingPrice = state.pendingPrice;
+    let items = null;
+    if (pendingItems.length) {
+      if (pendingItems.some(it => it.price === '' || it.price == null)) { showToast('Enter a price for each service'); return; }
+      if (pendingItems.some(it => !isValidPrice(it.price))) { showToast('Prices should be plain numbers, e.g. 250'); return; }
+      items = pendingItems.map(it => ({ service: it.service, price: +it.price }));
+      pendingPrice = String(Math.round(items.reduce((sum, it) => sum + it.price, 0) * 100) / 100);
+    }
     if (!pendingPrice || !pendingPaymentMethod) { showToast('Enter the price and payment method to complete'); return; }
     if (!isValidPrice(pendingPrice)) { showToast('Price should be a plain number, e.g. 250'); return; }
-    const list = state.appointments.map(a => a.id === completingId ? { ...a, status: 'done', price: pendingPrice, paymentMethod: pendingPaymentMethod, updatedAt: Date.now() } : a);
+    const list = state.appointments.map(a => {
+      if (a.id !== completingId) return a;
+      const svcs = serviceList(a);
+      const lineItems = items || (svcs.length === 1 ? [{ service: svcs[0], price: +pendingPrice }] : null);
+      const { items: _old, ...rest } = a;
+      return { ...rest, ...(lineItems ? { items: lineItems } : {}), status: 'done', price: pendingPrice, paymentMethod: pendingPaymentMethod, updatedAt: Date.now() };
+    });
     persist(list);
     let toast = 'Marked as completed';
     if (state.businessProfile.thanksEnabled !== false) {
@@ -1297,7 +1513,7 @@ const Actions = {
       else if (openThanksFor(completingId)) toast = 'Completed — thank-you is ready in WhatsApp, tap Send';
       else toast = 'Completed — WhatsApp didn’t open; use “Send thank-you” below';
     }
-    setState({ completingId: null, pendingPrice: '', pendingPaymentMethod: '' });
+    setState({ completingId: null, pendingPrice: '', pendingPaymentMethod: '', pendingItems: [] });
     showToast(toast);
   },
 
@@ -1368,7 +1584,17 @@ const Actions = {
       // Keep the same reschedule-history trail the dedicated Reschedule button
       // uses, so editing the date/time here behaves identically either way.
       const history = dateTimeChanged ? [...(a.history || []), { date: a.date, time: a.time }] : a.history;
-      return { ...a, ...editForm, history, updatedAt: Date.now(), reminderSent: dateTimeChanged ? false : a.reminderSent };
+      // Per-service prices only stay if they still add up to the same services
+      // and total; otherwise they'd contradict the edit, so they're dropped
+      // (a single service simply becomes its own line item again).
+      const { items: oldItems, ...rest } = a;
+      const sameServices = Array.isArray(oldItems) && oldItems.length === editForm.services.length && oldItems.every(it => editForm.services.includes(it.service));
+      const sumMatches = Array.isArray(oldItems) && Math.abs(oldItems.reduce((t, it) => t + (+it.price || 0), 0) - (+editForm.price || 0)) < 0.005;
+      const items = sameServices && sumMatches ? oldItems
+        : (editForm.services.length === 1 && editForm.price !== '' ? [{ service: editForm.services[0], price: +editForm.price }] : null);
+      // (reminderSent is only written when it changes: copying an absent one
+      // would write `undefined`, which Firestore rejects for the whole save.)
+      return { ...rest, ...editForm, ...(items ? { items } : {}), ...(history ? { history } : {}), updatedAt: Date.now(), ...(dateTimeChanged ? { reminderSent: false } : {}) };
     });
     persist(list);
     persistClients(upsertClient(state.clients, { name: editForm.name, phone: editForm.phone, address: editForm.address }));
@@ -1544,7 +1770,7 @@ function computeVals(){
 
   const topClients = byKey(periodCompleted, a => a.name).sort((a,b) => b.revenue - a.revenue).slice(0,5)
     .map(c => ({ label: c.key, sub: `${c.count} visit${c.count===1?'':'s'}`, valueLabel: `${currency}${c.revenue}` }));
-  const topServices = byKeyMulti(periodCompleted, a => serviceList(a)).sort((a,b) => b.count - a.count).slice(0,5)
+  const topServices = serviceTotals(periodCompleted).sort((a,b) => b.count - a.count).slice(0,5)
     .map(sv => ({ label: sv.key || 'Other', sub: `${currency}${Math.round(sv.revenue)} total`, valueLabel: `${sv.count}×` }));
   const paymentBreakdown = byKey(periodCompleted, a => a.paymentMethod).sort((a,b) => b.revenue - a.revenue)
     .map(p => ({ label: p.key || 'Unrecorded', valueLabel: `${currency}${p.revenue}` }));
@@ -1601,61 +1827,152 @@ function computeVals(){
 
   const recentClients = getRecentClients(s.appointments, 8);
 
-  const clientKeyOf = c => (c.phone || '').replace(/\D/g, '') || (c.name || '').toLowerCase().trim();
-  const apptKeyOf = a => (a.phone || '').replace(/\D/g, '') || (a.name || '').toLowerCase().trim();
+  // ---- Client database ----
+  // Appointments grouped by client key once, instead of a filter per client.
+  const apptsByKey = new Map();
+  s.appointments.forEach(a => {
+    const k = clientKey(a);
+    if (!k) return;
+    if (!apptsByKey.has(k)) apptsByKey.set(k, []);
+    apptsByKey.get(k).push(a);
+  });
+  const apptTime = a => (a.date ? toDateObj(a.date, a.time || '00:00').getTime() : 0);
   const allClients = s.clients.map(c => {
-    const key = clientKeyOf(c);
-    const theirAppts = s.appointments.filter(a => apptKeyOf(a) === key);
-    const totalSpend = theirAppts.filter(a => a.status === 'done').reduce((sum,a) => sum + (+a.price || 0), 0);
+    const theirAppts = apptsByKey.get(clientKey(c)) || [];
+    const done = theirAppts.filter(a => a.status === 'done');
+    const totalSpend = done.reduce((sum,a) => sum + (+a.price || 0), 0);
     const noShowCount = theirAppts.filter(a => a.status === 'no-show').length;
     const lastVisit = theirAppts.reduce((latest, a) => {
       if (!a.date) return latest;
-      const t = toDateObj(a.date, a.time || '00:00').getTime();
+      const t = apptTime(a);
       return (!latest || t > latest.t) ? { t, dateLabel: fmtDateLabel(a.date) } : latest;
     }, null);
     return {
       ...c,
       visitCount: theirAppts.length,
-      totalSpendLabel: `${currency}${totalSpend}`,
+      doneCount: done.length,
+      totalSpend,
+      totalSpendLabel: `${currency}${Math.round(totalSpend)}`,
       noShowCount,
-      lastVisitLabel: lastVisit ? lastVisit.dateLabel : 'No visits yet'
+      lastVisitT: lastVisit ? lastVisit.t : 0,
+      lastVisitLabel: lastVisit ? lastVisit.dateLabel : 'No visits yet',
+      consentState: consentStatus(c)
     };
-  }).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  });
+  const sortMode = s.clientSort || 'az';
+  const sorters = {
+    az: (a,b) => (a.name || a.phone || '').localeCompare(b.name || b.phone || ''),
+    recent: (a,b) => b.lastVisitT - a.lastVisitT,
+    spend: (a,b) => b.totalSpend - a.totalSpend
+  };
+  allClients.sort(sorters[sortMode] || sorters.az);
+  const clientById = new Map(allClients.map(c => [c.id, c]));
 
-  // Drilling into one client's full appointment history (tapped from a search
-  // result or the "All clients" list) -- a dedicated view, not the search box
-  // reused as a filter, since search now shows one grouped row per client
-  // rather than one row per appointment.
-  const viewingClient = s.viewingClientId ? allClients.find(c => c.id === s.viewingClientId) : null;
-  const viewingClientAppointments = viewingClient
-    ? withMeta(s.appointments.filter(a => apptKeyOf(a) === clientKeyOf(viewingClient))
-        .sort((a,b) => toDateObj(b.date||'1970-01-01', b.time||'00:00') - toDateObj(a.date||'1970-01-01', a.time||'00:00')))
-    : [];
+  // Possible duplicates: names that look alike but different (or missing)
+  // phone numbers. Suggestions only -- she decides. Cached on the clients
+  // array so it isn't recomputed on every keystroke.
+  if (computeVals._dupRef !== s.clients) {
+    const pairs = [];
+    const list = s.clients;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (phoneKey(a.phone) && phoneKey(a.phone) === phoneKey(b.phone)) continue;
+        if ((a.notSameAs || []).includes(b.id) || (b.notSameAs || []).includes(a.id)) continue;
+        if (namesLookAlike(a.name, b.name)) pairs.push([a.id, b.id]);
+      }
+    }
+    computeVals._dupRef = s.clients;
+    computeVals._dupPairs = pairs;
+  }
+  const duplicatePairs = computeVals._dupPairs
+    .map(([x, y]) => ({ a: clientById.get(x), b: clientById.get(y) }))
+    .filter(p => p.a && p.b);
 
-  // Live suggestions while typing a client's name on the Add screen, so a
-  // returning client's phone/address doesn't need to be re-typed from memory.
-  // Only while phone is still blank -- once it's filled (by picking a match,
-  // or by typing one manually for a genuinely new client), suggestions stop
-  // showing rather than lingering under an already-answered field. Requires
-  // at least 2 characters so it doesn't flash a huge list after one keystroke.
+  // ---- Client profile (tapped from the list or a search result) ----
+  const viewingClient = s.viewingClientId ? clientById.get(s.viewingClientId) || null : null;
+  let clientProfile = null;
+  if (viewingClient) {
+    const theirAppts = (apptsByKey.get(clientKey(viewingClient)) || []).slice();
+    const decorate = a => {
+      const items = visitItems(a);
+      return {
+        ...withMeta([a])[0],
+        itemRows: items.map(it => ({ service: it.service, priceLabel: it.price != null ? `${currency}${it.price}` : '' })),
+        totalLabel: a.price ? `${currency}${a.price}` : '',
+        paymentLabel: a.paymentMethod || ''
+      };
+    };
+    const upcomingAppts = theirAppts.filter(a => a.status === 'upcoming' && a.date && a.date >= todayStr)
+      .sort((a,b) => apptTime(a) - apptTime(b)).map(decorate);
+    const pastAppts = theirAppts.filter(a => !(a.status === 'upcoming' && a.date && a.date >= todayStr))
+      .sort((a,b) => apptTime(b) - apptTime(a)).map(decorate);
+    const done = theirAppts.filter(a => a.status === 'done');
+    const byService = serviceTotals(done).sort((a,b) => b.revenue - a.revenue);
+    const firstDate = theirAppts.filter(a => a.date).map(a => a.date).sort()[0];
+    const lastDone = done.filter(a => a.date).map(a => a.date).sort().pop();
+    clientProfile = {
+      client: viewingClient,
+      telLink: `tel:${viewingClient.phone || ''}`,
+      waLink: viewingClient.phone ? `https://wa.me/${waNumber(viewingClient.phone)}` : '',
+      stats: [
+        { label: 'Total paid', value: `${currency}${Math.round(viewingClient.totalSpend)}` },
+        { label: 'Visits', value: String(done.length) },
+        { label: 'Avg per visit', value: done.length ? `${currency}${Math.round(viewingClient.totalSpend / done.length)}` : '—' },
+        { label: 'Last visit', value: lastDone ? fmtShortDate(lastDone) : '—' }
+      ],
+      facts: [
+        firstDate ? `Client since ${fmtShortDate(firstDate)}` : '',
+        byService.length ? `Usually books ${byService.slice().sort((a,b) => b.count - a.count)[0].key}` : '',
+        viewingClient.noShowCount ? `${viewingClient.noShowCount} no-show${viewingClient.noShowCount === 1 ? '' : 's'}` : '',
+        theirAppts.filter(a => a.status === 'cancelled').length ? `${theirAppts.filter(a => a.status === 'cancelled').length} cancelled` : ''
+      ].filter(Boolean),
+      consentLabel: { yes: 'OK to send offers', no: 'Said no to offers', asked: 'Asked about offers — no answer yet', '': 'Not asked about offers yet' }[viewingClient.consentState],
+      upcomingAppts, pastAppts,
+      byService: byService.map(sv => ({ label: sv.key, sub: `${sv.count}×`, valueLabel: `${currency}${Math.round(sv.revenue)}` })),
+      duplicates: duplicatePairs.filter(p => p.a.id === viewingClient.id || p.b.id === viewingClient.id)
+        .map(p => (p.a.id === viewingClient.id ? p.b : p.a))
+    };
+  }
+  const viewingClientAppointments = clientProfile ? clientProfile.pastAppts : [];
+
+  // ---- "Is this the same client?" while adding ----
+  // Name autocomplete (phone still blank): substring OR look-alike names.
   const formNameQ = (s.form.name || '').trim().toLowerCase();
   const nameMatches = (!s.form.phone && formNameQ.length >= 2)
-    ? s.clients.filter(c => (c.name || '').toLowerCase().includes(formNameQ)).slice(0, 5)
+    ? s.clients.filter(c => (c.name || '').toLowerCase().includes(formNameQ) || (formNameQ.length >= 4 && namesLookAlike(c.name, s.form.name)))
+        .slice(0, 5).map(c => clientById.get(c.id) || c)
     : [];
+  // Once a phone is entered: an exact match on the number means this IS that
+  // client; a look-alike name or the same last 7 digits are "maybe" matches.
+  const findLookAlikes = (name, phone) => {
+    const pk = phoneKey(phone);
+    if (!pk && normName(name).length < 2) return { exact: null, maybe: [] };
+    const exact = pk ? allClients.find(c => phoneKey(c.phone) === pk) || null : null;
+    const tail = pk.length >= 7 ? pk.slice(-7) : '';
+    const maybe = allClients.filter(c => c !== exact && (
+      (name && namesLookAlike(c.name, name)) ||
+      (tail && phoneKey(c.phone).slice(-7) === tail)
+    )).slice(0, 3);
+    return { exact, maybe };
+  };
+  const formSignature = `${normName(s.form.name)}|${phoneKey(s.form.phone)}`;
+  const formMatch = (s.form.phone && s.dupDismissed !== formSignature) ? findLookAlikes(s.form.name, s.form.phone) : { exact: null, maybe: [] };
+  const formExactIsSame = !!formMatch.exact && normName(formMatch.exact.name) === normName(s.form.name);
+  const sameClientCard = s.form.phone && s.dupDismissed !== formSignature && (formMatch.exact || formMatch.maybe.length) ? {
+    exact: formMatch.exact, exactIsSame: formExactIsSame,
+    maybe: formExactIsSame ? [] : formMatch.maybe
+  } : null;
+  const addClientMatch = s.addingClient && s.addClientChecked ? findLookAlikes(s.newClientForm.name, s.newClientForm.phone) : null;
+  const addClientDupes = addClientMatch ? [addClientMatch.exact, ...addClientMatch.maybe].filter(Boolean) : [];
 
-  // Group search results by client (not one row per appointment) -- same
-  // shape and tap-through as the "All clients" list above, just filtered by
-  // query, so a client with several bookings shows up once instead of once
-  // per appointment. Phone numbers get typed with all kinds of punctuation
-  // (dashes, spaces, parens) depending on where they were entered from --
-  // compare digits-only on both sides so formatting differences don't hide a
-  // real match. Only applied when the query actually has digits, so a
-  // pure-name search doesn't spuriously match every phone number via an
-  // empty-string .includes().
+  // Search: name, phone (digits only, any formatting) or address.
   const searchDigits = searchQ.replace(/\D/g, '');
   const searchResults = searchQ ? allClients.filter(c =>
     (c.name || '').toLowerCase().includes(searchQ) ||
-    (searchDigits && (c.phone || '').replace(/\D/g, '').includes(searchDigits))
+    (searchDigits && phoneKey(c.phone).includes(phoneKey(searchDigits) || searchDigits)) ||
+    (c.address || '').toLowerCase().includes(searchQ) ||
+    (searchQ.length >= 4 && namesLookAlike(c.name, searchQ))
   ) : [];
 
   return {
@@ -1694,8 +2011,9 @@ function computeVals(){
     calendarGrid, calendarDayAppts, calendarDaySchedule, calendarSelectedBlocked,
     recentClients, hasRecentClients: recentClients.length > 0,
     nameMatches, hasNameMatches: nameMatches.length > 0,
-    viewingClient, viewingClientAppointments,
-    allClients, hasClients: allClients.length > 0,
+    viewingClient, viewingClientAppointments, clientProfile,
+    allClients, hasClients: allClients.length > 0, sortMode, duplicatePairs,
+    sameClientCard, addClientDupes,
     thanksInfo, consentInfo, consentCount, thanksPreview
   };
 }
@@ -1811,6 +2129,26 @@ function renderHome(v){
   return html;
 }
 
+// Under the phone field on the Add screen. Exact phone + same name: a quiet
+// confirmation. Otherwise she chooses: use the existing client, or carry on
+// with a new one.
+function renderSameClientCard(card){
+  if (!card) return '';
+  const row = (c, label) => `<div class="match-row">
+    <div><div class="list-row-label">${esc(c.name || c.phone)}</div><div class="list-row-sub">${esc(c.phone || 'No phone')} &middot; ${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; last: ${esc(c.lastVisitLabel)}</div></div>
+    <div class="payment-chip payment-chip--active" data-action="useExistingClient" data-id="${esc(c.id)}">${label}</div>
+  </div>`;
+  if (card.exact && card.exactIsSame) {
+    return `<div class="match-card match-card--ok" id="same-client-card">&#9989; Existing client &middot; ${card.exact.visitCount} visit${card.exact.visitCount===1?'':'s'} &middot; ${esc(card.exact.totalSpendLabel)} &middot; last: ${esc(card.exact.lastVisitLabel)}</div>`;
+  }
+  return `<div class="match-card" id="same-client-card">
+    <div class="inline-panel-title">${card.exact ? 'This number is already saved' : 'Is this the same client?'}</div>
+    ${card.exact ? row(card.exact, 'Use this client') : ''}
+    ${card.maybe.map(c => row(c, 'Same person')).join('')}
+    <div class="edit-link" style="margin-top:6px" data-action="dismissDupe">${card.exact ? 'Keep the name I typed' : 'No, this is a new client'}</div>
+  </div>`;
+}
+
 function renderAdd(v){
   const s = state, f = s.form;
   let html = '<div>';
@@ -1842,10 +2180,11 @@ function renderAdd(v){
     ${v.hasNameMatches ? `<div class="list-col" style="margin-bottom:0;gap:6px">
       ${v.nameMatches.map(c => `<div class="list-row" style="cursor:pointer" data-action="pickNameMatch" data-id="${esc(c.id)}">
         <div class="list-row-label">${esc(c.name || c.phone)}</div>
-        <div class="list-row-sub">${esc(c.phone)}</div>
+        <div class="list-row-sub">${esc(c.phone)}${c.visitCount != null ? ` &middot; ${c.visitCount} visit${c.visitCount===1?'':'s'}` : ''}</div>
       </div>`).join('')}
     </div>` : ''}
     <input id="field-phone" class="field" type="tel" inputmode="tel" autocomplete="tel" data-bind="form.phone" value="${esc(f.phone)}" placeholder="Phone number"/>
+    ${renderSameClientCard(v.sameClientCard)}
     <div class="payment-panel-title" style="margin-top:2px">Services (tap all that apply)</div>
     <div class="payment-chip-row" style="margin-bottom:4px">
       ${s.services.map(sv => `<div class="payment-chip ${f.services.includes(sv.name)?'payment-chip--active':''}" data-action="toggleFormService" data-value="${esc(sv.name)}">${esc(sv.name)}</div>`).join('')}
@@ -1892,41 +2231,123 @@ function renderAdd(v){
 // one row per client (name, phone, visit stats), tap to open their full
 // booking history. Kept separate from the browse list's row markup only in
 // that merge/consent controls don't make sense mid-search.
+function consentBadge(c){
+  return c.consentState === 'yes' ? '<span class="client-badge client-badge--yes">Offers OK</span>'
+    : c.consentState === 'no' ? '<span class="client-badge">No offers</span>' : '';
+}
 function renderClientSearchRow(c){
   return `<div class="appt-card appt-card--upcoming" data-action="viewClientHistory" data-id="${esc(c.id)}">
     <div>
-      <div class="appt-name">${esc(c.name || c.phone)}</div>
+      <div class="appt-name">${esc(c.name || c.phone)} ${consentBadge(c)}</div>
       <div class="appt-service">${esc(c.phone)}</div>
       <div class="appt-service">${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; ${esc(c.totalSpendLabel)}${c.noShowCount ? ` &middot; ${c.noShowCount} no-show${c.noShowCount===1?'':'s'}` : ''} &middot; last: ${esc(c.lastVisitLabel)}</div>
     </div>
   </div>`;
 }
 
+// Full client profile: contact, totals, upcoming, every past visit with its
+// per-service amounts, spend by service, and edit / book / merge.
+function renderClientProfile(v){
+  const p = v.clientProfile, c = p.client, s = state;
+  let html = `<div>
+    <div class="back-link" data-action="backFromClientHistory">&larr; Back</div>
+    <div class="section-title">${esc(c.name || c.phone)}</div>
+    <div class="hint-text">${esc(c.phone || 'No phone number')}${c.address ? ` &middot; ${esc(c.address)}` : ''}</div>`;
+  if (s.editingClientId === c.id) {
+    const f = s.editClientForm;
+    html += `<div class="inline-panel">
+      <div class="inline-panel-title">Edit client</div>
+      <div class="field-stack" style="margin-top:0;margin-bottom:10px">
+        <input id="edit-client-name" class="field" data-bind="editClientForm.name" value="${esc(f.name)}" placeholder="Client name"/>
+        <input id="edit-client-phone" class="field" type="tel" inputmode="tel" data-bind="editClientForm.phone" value="${esc(f.phone)}" placeholder="Phone number"/>
+        <input id="edit-client-address" class="field" data-bind="editClientForm.address" value="${esc(f.address)}" placeholder="Address"/>
+      </div>
+      <div class="hint-text">Their past bookings stay linked. Changing the phone updates it on their bookings too.</div>
+      <div style="display:flex;gap:8px">
+        <div class="action-btn-secondary" style="flex:1" data-action="cancelEditClient">Cancel</div>
+        <div class="btn-primary" style="flex:1;margin-top:0" data-action="saveEditClient">Save</div>
+      </div>
+    </div>`;
+  }
+  html += `<div class="link-grid">
+    ${c.phone ? `<a href="${esc(p.telLink)}" class="link-btn">&#128222; Call</a>
+    <a href="${esc(p.waLink)}" target="_blank" rel="noopener" class="link-btn link-btn--whatsapp">WhatsApp</a>` : ''}
+  </div>
+  <div class="stat-grid">
+    ${p.stats.map(st => `<div class="stat-card"><div class="stat-label">${esc(st.label)}</div><div class="stat-value">${esc(st.value)}</div></div>`).join('')}
+  </div>
+  <div class="hint-text">${p.facts.map(esc).join(' &middot; ')}${p.facts.length ? ' &middot; ' : ''}${esc(p.consentLabel)}</div>
+  <div class="action-grid" style="margin-bottom:14px">
+    <div class="action-btn-secondary" data-action="bookForClient" data-id="${esc(c.id)}">&#10133; New booking</div>
+    <div class="action-btn-secondary" data-action="openEditClient" data-id="${esc(c.id)}">Edit client</div>
+  </div>`;
+  if (p.duplicates.length) {
+    html += `<div class="inline-panel">
+      <div class="inline-panel-title">Could be the same person</div>
+      ${p.duplicates.map(d => `<div class="match-row">
+        <div><div class="list-row-label">${esc(d.name || d.phone)}</div><div class="list-row-sub">${esc(d.phone || 'No phone')} &middot; ${d.visitCount} visit${d.visitCount===1?'':'s'}</div></div>
+        <div class="match-actions">
+          <div class="payment-chip" data-action="mergePair" data-id="${esc(c.id)}|${esc(d.id)}">Merge into this</div>
+          <div class="payment-chip" data-action="notSamePair" data-id="${esc(c.id)}|${esc(d.id)}">Not the same</div>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  }
+  const visitCard = a => `<div class="appt-card appt-card--upcoming visit-card" data-action="openAppt" data-id="${esc(a.id)}">
+      <div style="flex:1;min-width:0">
+        <div class="visit-head"><span class="appt-name">${esc(a.dateLabel)}</span><span class="status-label" style="color:${a.statusColor}">${esc(a.statusLabel)}</span></div>
+        <div class="appt-service">${esc(a.timeLabel)}${a.paymentLabel ? ` &middot; ${esc(a.paymentLabel)}` : ''}</div>
+        <div class="visit-items">
+          ${a.itemRows.map(it => `<div class="visit-item"><span>${esc(it.service)}</span><span>${esc(it.priceLabel)}</span></div>`).join('')}
+          ${a.totalLabel && a.itemRows.length > 1 ? `<div class="visit-item visit-item--total"><span>Total</span><span>${esc(a.totalLabel)}</span></div>` : ''}
+          ${a.totalLabel && a.itemRows.length <= 1 && !(a.itemRows[0] && a.itemRows[0].priceLabel) ? `<div class="visit-item visit-item--total"><span>Total</span><span>${esc(a.totalLabel)}</span></div>` : ''}
+        </div>
+        ${a.notes ? `<div class="appt-service" style="margin-top:4px">${esc(a.notes)}</div>` : ''}
+      </div>
+    </div>`;
+  if (p.upcomingAppts.length) {
+    html += `<div class="payment-panel-title">Upcoming</div><div class="appt-list" style="margin-bottom:16px">${p.upcomingAppts.map(visitCard).join('')}</div>`;
+  }
+  html += `<div class="payment-panel-title">Visit history</div>`;
+  html += p.pastAppts.length
+    ? `<div class="appt-list" style="margin-bottom:16px">${p.pastAppts.map(visitCard).join('')}</div>`
+    : `<div class="empty-state">No past visits yet.</div>`;
+  if (p.byService.length) {
+    html += `<div class="payment-panel-title">Spend by service</div>
+    <div class="list-col">${p.byService.map(r => `<div class="list-row"><div><div class="list-row-label">${esc(r.label)}</div><div class="list-row-sub">${esc(r.sub)}</div></div><div class="list-row-value">${esc(r.valueLabel)}</div></div>`).join('')}</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 function renderSearch(v){
   const s = state;
-  if (s.viewingClientId && v.viewingClient) {
-    const c = v.viewingClient;
-    let html = `<div>
-      <div class="back-link" data-action="backFromClientHistory">&larr; Back</div>
-      <div class="section-title">${esc(c.name || c.phone)}</div>
-      <div class="hint-text">${esc(c.phone)} &middot; ${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; ${esc(c.totalSpendLabel)}${c.noShowCount ? ` &middot; ${c.noShowCount} no-show${c.noShowCount===1?'':'s'}` : ''}</div>`;
-    if (v.viewingClientAppointments.length) {
-      html += `<div class="appt-list">${v.viewingClientAppointments.map(a => `
-        <div class="appt-card appt-card--upcoming" data-action="openAppt" data-id="${esc(a.id)}">
-          <div>
-            <div class="appt-name">${esc(a.service)}</div>
-            <div class="appt-service">${esc(a.dateLabel)} ${esc(a.timeLabel)}</div>
-          </div>
-          <div class="status-label" style="color:${a.statusColor}">${esc(a.statusLabel)}</div>
-        </div>`).join('')}</div>`;
-    } else {
-      html += `<div class="empty-state">No appointments yet.</div>`;
-    }
-    html += '</div>';
-    return html;
-  }
+  if (s.viewingClientId && v.clientProfile) return renderClientProfile(v);
   let html = `<div>
-    <input id="search-input" class="field search-field" data-bind="search" value="${esc(s.search)}" placeholder="Search client name or phone"/>`;
+    <input id="search-input" class="field search-field" data-bind="search" value="${esc(s.search)}" placeholder="Search name, phone or address"/>
+    <div class="period-presets">
+      ${[['az','A–Z'],['recent','Recent'],['spend','Top spend']].map(([k,l]) => `<div class="period-chip ${v.sortMode===k?'period-chip--active':''}" data-action="setClientSort" data-value="${k}">${l}</div>`).join('')}
+    </div>`;
+  if (!s.search && !s.mergingClientId && v.duplicatePairs.length) {
+    html += `<div class="banner-warning-row" data-action="toggleDuplicates">
+      <div class="banner-warning-text">${v.duplicatePairs.length} possible duplicate${v.duplicatePairs.length===1?'':'s'} — review</div>
+      <div class="banner-warning-cta">${s.showDuplicates ? 'Hide' : 'Review &rarr;'}</div>
+    </div>`;
+    if (s.showDuplicates) {
+      html += `<div class="inline-panel">
+        <div class="inline-panel-title">Same person?</div>
+        <div class="hint-text">Merge keeps the first one and moves the other's bookings under it.</div>
+        ${v.duplicatePairs.map(p => `<div class="match-row">
+          <div><div class="list-row-label">${esc(p.a.name || p.a.phone)} &harr; ${esc(p.b.name || p.b.phone)}</div>
+          <div class="list-row-sub">${esc(p.a.phone || 'no phone')} (${p.a.visitCount}) &middot; ${esc(p.b.phone || 'no phone')} (${p.b.visitCount})</div></div>
+          <div class="match-actions">
+            <div class="payment-chip" data-action="mergePair" data-id="${esc(p.a.id)}|${esc(p.b.id)}">Merge</div>
+            <div class="payment-chip" data-action="notSamePair" data-id="${esc(p.a.id)}|${esc(p.b.id)}">Not the same</div>
+          </div>
+        </div>`).join('')}
+      </div>`;
+    }
+  }
   if (v.searchResults.length) {
     html += `<div class="appt-list">${v.searchResults.map(c => renderClientSearchRow(c)).join('')}</div>`;
   } else if (!s.search) {
@@ -1951,9 +2372,18 @@ function renderSearch(v){
           <input id="new-client-phone" class="field" type="tel" inputmode="tel" autocomplete="tel" data-bind="newClientForm.phone" value="${esc(s.newClientForm.phone)}" placeholder="Phone number"/>
           <input id="new-client-address" class="field" data-bind="newClientForm.address" value="${esc(s.newClientForm.address)}" placeholder="Address (optional)"/>
         </div>
+        ${v.addClientDupes.length ? `<div class="match-card">
+          <div class="inline-panel-title">Already a client?</div>
+          ${v.addClientDupes.map(c => `<div class="match-row">
+            <div><div class="list-row-label">${esc(c.name || c.phone)}</div><div class="list-row-sub">${esc(c.phone || 'No phone')} &middot; ${c.visitCount} visit${c.visitCount===1?'':'s'} &middot; last: ${esc(c.lastVisitLabel)}</div></div>
+            <div class="payment-chip" data-action="viewClientHistory" data-id="${esc(c.id)}">Open</div>
+          </div>`).join('')}
+        </div>` : ''}
         <div style="display:flex;gap:8px">
           <div class="action-btn-secondary" style="flex:1" data-action="cancelAddClient">Cancel</div>
-          <div class="btn-primary" style="flex:1;margin-top:0" data-action="confirmAddClient">Add client</div>
+          ${v.addClientDupes.length
+            ? `<div class="btn-primary" style="flex:1;margin-top:0" data-action="confirmAddClientAnyway">No, add new client</div>`
+            : `<div class="btn-primary" style="flex:1;margin-top:0" data-action="confirmAddClient">Add client</div>`}
         </div>
       </div>`;
     } else {
@@ -2098,7 +2528,7 @@ function renderDetail(v){
       <div class="detail-info">
         <div><b>When:</b> ${esc(d.dateLabel)} at ${esc(d.timeLabel)}</div>
         ${d.address ? `<div><b>Where:</b> ${esc(d.address)}</div>` : ''}
-        ${d.priceLabel ? `<div><b>Price:</b> ${esc(d.priceLabel)}</div>` : ''}
+        ${d.priceLabel ? `<div><b>Price:</b> ${esc(d.priceLabel)}${Array.isArray(d.items) && d.items.length > 1 ? ` <span class="hint-text">(${d.items.map(it => `${esc(it.service)} ${esc(v.currency)}${esc(it.price)}`).join(' + ')})</span>` : ''}</div>` : ''}
         ${d.notes ? `<div><b>Notes:</b> ${esc(d.notes)}</div>` : ''}
       </div>
     </div>`;
@@ -2172,7 +2602,13 @@ function renderDetail(v){
   if (v.isCompletingThis) {
     html += `<div class="inline-panel">
       <div class="inline-panel-title">Confirm completion</div>
-      <input id="pending-price" class="field" inputmode="decimal" style="margin-bottom:8px" data-bind="pendingPrice" value="${esc(state.pendingPrice)}" placeholder="Final price"/>
+      ${state.pendingItems.length ? `<div class="hint-text" style="margin-bottom:6px">Price for each service</div>
+      ${state.pendingItems.map((it, i) => `<div class="item-price-row">
+        <div class="item-price-label">${esc(it.service)}</div>
+        <input id="pending-item-${i}" class="field" inputmode="decimal" data-bind="pendingItems.${i}.price" value="${esc(it.price)}" placeholder="0"/>
+      </div>`).join('')}
+      <div class="item-price-total">Total: ${esc(v.currency)}${esc(String(Math.round(state.pendingItems.reduce((t, it) => t + (+it.price || 0), 0) * 100) / 100))}</div>`
+      : `<input id="pending-price" class="field" inputmode="decimal" style="margin-bottom:8px" data-bind="pendingPrice" value="${esc(state.pendingPrice)}" placeholder="Final price"/>`}
       <div class="payment-chip-row" style="margin-bottom:10px">
         ${PAYMENT_METHODS.map(m => `<div class="payment-chip ${state.pendingPaymentMethod===m?'payment-chip--active':''}" data-action="selectPayment" data-value="${esc(m)}">${esc(m)}</div>`).join('')}
       </div>
@@ -2301,11 +2737,12 @@ function renderSettings(v){
   <div style="margin-bottom:22px"><div class="hint-text" style="margin-bottom:4px">Travel buffer between appointments (min)</div><input type="number" inputmode="numeric" class="field" data-bind="businessProfile.travelBufferMin" value="${esc(bp.travelBufferMin)}"/></div>`;
 
   html += `<div class="section-title">Services you offer</div>
-  <div class="hint-text">Add, rename, or remove the services shown when booking a new appointment.</div>
+  <div class="hint-text">Add, rename, or remove the services shown when booking. The price is optional — it pre-fills each service's price when you complete a visit.</div>
   <div class="service-list">
     ${s.services.map(sv => `
       <div class="service-row">
         <input id="service-${esc(sv.id)}" class="field" data-service-id="${esc(sv.id)}" value="${esc(sv.name)}"/>
+        <input id="service-price-${esc(sv.id)}" class="field service-price" inputmode="decimal" data-service-price-id="${esc(sv.id)}" value="${esc(sv.price != null ? sv.price : '')}" placeholder="${esc(bp.currency)} price" aria-label="Default price for ${esc(sv.name)}"/>
         <div class="service-remove" data-action="deleteService" data-id="${esc(sv.id)}">Remove</div>
       </div>`).join('')}
   </div>
@@ -2718,6 +3155,17 @@ root.addEventListener('change', e => {
     if (action === 'onImportBackup') importBackupFile(file);
     if (action === 'onLogoChange') onLogoFile(file);
     el.value = '';
+    return;
+  }
+  if (el.dataset && el.dataset.servicePriceId) {
+    const id = el.dataset.servicePriceId;
+    const v = (el.value || '').trim();
+    if (v !== '' && !isValidPrice(v)) { showToast('Price should be a plain number, e.g. 40'); return; }
+    persistServices(state.services.map(sv => {
+      if (sv.id !== id) return sv;
+      const { price, ...rest } = sv;
+      return { ...rest, ...(v !== '' ? { price: +v } : {}), updatedAt: Date.now() };
+    }));
     return;
   }
   if (el.dataset && el.dataset.serviceId) {
